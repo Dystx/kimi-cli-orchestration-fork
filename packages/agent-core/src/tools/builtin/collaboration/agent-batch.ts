@@ -53,6 +53,12 @@ export const AgentBatchInputSchema = z.object({
     .min(2)
     .max(8)
     .describe('2-8 parallel subagent tasks'),
+  aggregate_mode: z
+    .enum(['concat', 'vote', 'best_of'])
+    .optional()
+    .describe(
+      'Aggregation mode: concat (default) joins all results; vote counts agreement when all agents answer the same question; best_of returns the most common result when running identical prompts multiple times.',
+    ),
   aggregate_prompt: z
     .string()
     .optional()
@@ -162,9 +168,89 @@ export class AgentBatchTool implements BuiltinTool<AgentBatchInput> {
     }
 
     const hasFailure = results.some((r) => r.status === 'rejected');
+    const mode = args.aggregate_mode ?? 'concat';
+
+    if (mode === 'vote' || mode === 'best_of') {
+      const successful: string[] = [];
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          successful.push(r.value.result.trim());
+        }
+      }
+      const voteResult = aggregateVotes(successful, mode);
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+      lines.push(voteResult);
+    }
+
+    if (args.aggregate_prompt) {
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+      lines.push(`Aggregation instruction: ${args.aggregate_prompt}`);
+    }
+
     return {
       isError: hasFailure,
       output: lines.join('\n'),
     };
   }
+}
+
+function aggregateVotes(results: string[], mode: 'vote' | 'best_of'): string {
+  if (results.length === 0) return 'No successful results to aggregate.';
+
+  // Count occurrences (case-insensitive, normalized whitespace)
+  const counts = new Map<string, number>();
+  for (const r of results) {
+    const normalized = r.toLowerCase().replace(/\s+/g, ' ').trim();
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+  }
+
+  // Find the most common
+  let best = '';
+  let bestCount = 0;
+  for (const [normalized, count] of counts) {
+    if (count > bestCount) {
+      bestCount = count;
+      best = normalized;
+    }
+  }
+
+  const agreement = Math.round((bestCount / results.length) * 100);
+  const lines: string[] = [];
+
+  if (mode === 'vote') {
+    lines.push(`## Vote Result`);
+    lines.push(`Agreement: ${bestCount}/${results.length} (${agreement}%)`);
+    lines.push('');
+    lines.push('Most common answer:');
+    lines.push(best);
+    lines.push('');
+    lines.push('All answers:');
+    for (let i = 0; i < results.length; i++) {
+      const match = results[i]!.toLowerCase().replace(/\s+/g, ' ').trim() === best ? '✅' : '❌';
+      lines.push(`  [${i + 1}] ${match} ${results[i]!.slice(0, 120)}${results[i]!.length > 120 ? '...' : ''}`);
+    }
+  } else {
+    lines.push(`## Best-of Result`);
+    lines.push(`Most common result: ${bestCount}/${results.length} (${agreement}%)`);
+    lines.push('');
+    lines.push(best);
+    if (agreement < 100) {
+      lines.push('');
+      lines.push('Other results:');
+      const seen = new Set<string>();
+      for (const r of results) {
+        const normalized = r.toLowerCase().replace(/\s+/g, ' ').trim();
+        if (normalized !== best && !seen.has(normalized)) {
+          seen.add(normalized);
+          lines.push(`  - ${r.slice(0, 120)}${r.length > 120 ? '...' : ''}`);
+        }
+      }
+    }
+  }
+
+  return lines.join('\n');
 }

@@ -16,6 +16,7 @@
  * runtime.
  */
 
+import { sleep } from '@antfu/utils';
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
@@ -106,6 +107,24 @@ export const AgentToolInputSchema = z.preprocess(
       .optional()
       .describe(
         'Maximum wall-clock milliseconds the subagent may run before being auto-killed. Use this to bound latency for time-sensitive tasks.',
+      ),
+    max_retries: z
+      .number()
+      .int()
+      .min(0)
+      .max(3)
+      .optional()
+      .describe(
+        'Maximum number of automatic retries if the subagent fails with a transient error. Retries use exponential backoff. Not applied for user cancellations, timeouts, or budget exhaustion.',
+      ),
+    retry_delay_ms: z
+      .number()
+      .int()
+      .min(100)
+      .max(30000)
+      .optional()
+      .describe(
+        'Base delay in milliseconds between retries. Defaults to 1000ms. Each retry doubles this value (exponential backoff).',
       ),
     stream_updates: z
       .boolean()
@@ -300,37 +319,90 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         return { output: lines.join('\n') };
       }
 
-      try {
-        const result = await handle.completion;
-        const lines = [
-          `agent_id: ${handle.agentId}`,
-          `actual_subagent_type: ${handle.profileName}`,
-          'status: completed',
-          '',
-          '[summary]',
-          result.result,
-        ];
-        return { output: lines.join('\n') };
-      } catch (error) {
-        let message: string;
-        if (foregroundDeadline?.timedOut() === true && args.timeout !== undefined) {
-          message = `Agent timed out after ${args.timeout}s.`;
-        } else if (isUserCancellation(signal.reason)) {
-          message =
-            'The user manually interrupted this subagent (and any sibling agents launched alongside it). This was a deliberate user action, not a system error, a timeout, or a capacity/concurrency limit. Do not retry automatically or speculate about why it failed — wait for the user\'s next instruction.';
-        } else if (isAbortError(error)) {
-          message = 'The subagent was stopped before it finished.';
-        } else {
-          message = error instanceof Error ? error.message : String(error);
+      const maxRetries = args.max_retries ?? 0;
+      const baseDelayMs = args.retry_delay_ms ?? 1000;
+      let attempt = 0;
+
+      while (true) {
+        try {
+          const result = await handle.completion;
+          const lines = [
+            `agent_id: ${handle.agentId}`,
+            `actual_subagent_type: ${handle.profileName}`,
+            'status: completed',
+            '',
+            '[summary]',
+            result.result,
+          ];
+          return { output: lines.join('\n') };
+        } catch (error) {
+          let message: string;
+          if (foregroundDeadline?.timedOut() === true && args.timeout !== undefined) {
+            message = `Agent timed out after ${args.timeout}s.`;
+          } else if (isUserCancellation(signal.reason)) {
+            message =
+              'The user manually interrupted this subagent (and any sibling agents launched alongside it). This was a deliberate user action, not a system error, a timeout, or a capacity/concurrency limit. Do not retry automatically or speculate about why it failed — wait for the user\'s next instruction.';
+          } else if (isAbortError(error)) {
+            message = 'The subagent was stopped before it finished.';
+          } else {
+            message = error instanceof Error ? error.message : String(error);
+          }
+
+          // Determine if retryable
+          const isRetryable =
+            attempt < maxRetries &&
+            !isUserCancellation(signal.reason) &&
+            !(foregroundDeadline?.timedOut() === true && args.timeout !== undefined) &&
+            !isAbortError(error) &&
+            !message.includes('budget');
+
+          if (isRetryable) {
+            attempt++;
+            const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+            this.log?.info('subagent retry', {
+              toolCallId,
+              agentId: handle.agentId,
+              attempt,
+              maxRetries,
+              delayMs,
+              error: message,
+            });
+            await sleep(delayMs);
+            // Re-spawn the subagent for retry
+            try {
+              handle = await this.subagentHost.spawn(requestedProfileName ?? 'coder', {
+                ...options,
+                parentToolCallId: toolCallId,
+              });
+            } catch (spawnError) {
+              this.log?.warn('subagent retry spawn failed', {
+                toolCallId,
+                attempt,
+                error: spawnError,
+              });
+              // Fall through to error handling below
+              const lines = [
+                `agent_id: ${handle.agentId}`,
+                `actual_subagent_type: ${handle.profileName}`,
+                'status: failed',
+                '',
+                `subagent error: ${message}`,
+                `retry attempt ${attempt} failed: ${spawnError instanceof Error ? spawnError.message : String(spawnError)}`,
+              ];
+              return { output: lines.join('\n'), isError: true };
+            }
+            continue;
+          }
+
+          const lines = [
+            `agent_id: ${handle.agentId}`,
+            `actual_subagent_type: ${handle.profileName}`,
+            'status: failed',
+            '',
+            `subagent error: ${message}`,
+          ];
+          return { output: lines.join('\n'), isError: true };
         }
-        const lines = [
-          `agent_id: ${handle.agentId}`,
-          `actual_subagent_type: ${handle.profileName}`,
-          'status: failed',
-          '',
-          `subagent error: ${message}`,
-        ];
-        return { output: lines.join('\n'), isError: true };
       }
     } catch (error) {
       let message: string;

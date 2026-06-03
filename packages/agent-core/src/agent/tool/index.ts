@@ -438,8 +438,15 @@ export class ToolManager {
           new b.SendMessageTool(this.agent, this.agent.messageBus),
         this.agent.messageBus && this.agent.subagentHost &&
           new b.ReceiveMessageTool(this.agent, this.agent.messageBus),
+        this.agent.sharedStore && new b.ReadSharedStateTool(this.agent.sharedStore),
+        this.agent.sharedStore && new b.WriteSharedStateTool(this.agent.sharedStore),
+        this.agent.sharedStore && new b.ListSharedStateTool(this.agent.sharedStore),
+        this.agent.type === 'main' && this.agent.costTracker && new b.SetCostBudgetTool(this.agent.costTracker),
+        this.agent.type === 'main' && this.agent.costTracker && new b.GetCostStatusTool(this.agent.costTracker),
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
+        new b.BuildCodeIndexTool(kaos),
+        new b.QueryCodeIndexTool(kaos),
       ]
         .filter((tool) => !!tool)
         .map((tool) => [tool.name, tool] as const),

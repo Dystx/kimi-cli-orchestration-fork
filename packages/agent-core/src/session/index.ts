@@ -9,9 +9,11 @@ import type { KimiConfig, SDKSessionRPC } from '#/rpc';
 import { proxyWithExtraPayload } from '#/rpc/types';
 
 import { Agent, type AgentOptions, type AgentType } from '../agent';
+import { SessionCostTracker } from './cost-tracker';
 import { SessionGoalStore, type SessionGoalState } from './goal';
 import { HookEngine, type HookDef } from './hooks';
 import { SessionMessageBus } from './message-bus';
+import { SessionSharedStore } from './shared-store';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
 import { parseBooleanEnv, resolveConfigValue, type BackgroundConfig } from '../config';
 import { makeErrorPayload } from '../errors';
@@ -112,6 +114,8 @@ export class Session {
   readonly mcp: McpConnectionManager;
   readonly log: Logger;
   readonly messageBus: SessionMessageBus;
+  readonly sharedStore: SessionSharedStore;
+  readonly costTracker: SessionCostTracker;
   private readonly logHandle: SessionLogHandle | undefined;
   readonly hookEngine: HookEngine;
   readonly goals: SessionGoalStore;
@@ -142,6 +146,8 @@ export class Session {
       this.logHandle?.logger ??
       (options.id === undefined ? log : log.createChild({ sessionId: options.id }));
     this.messageBus = new SessionMessageBus();
+    this.sharedStore = new SessionSharedStore();
+    this.costTracker = new SessionCostTracker();
     this.rpc = options.rpc;
     this.hookEngine = new HookEngine(options.hooks, {
       cwd: options.kaos.getcwd(),
@@ -484,6 +490,9 @@ export class Session {
       pluginSessionStarts: type === 'main' ? this.options.pluginSessionStarts : undefined,
       appVersion: this.options.appVersion,
       messageBus: this.messageBus,
+      sharedStore: this.sharedStore,
+      costTracker: this.costTracker,
+      onUsageRecorded: (model, usage) => this.costTracker.record(model, usage),
     });
   }
 

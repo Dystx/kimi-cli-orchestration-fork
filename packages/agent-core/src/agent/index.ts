@@ -17,8 +17,10 @@ import type { EnabledPluginSessionStart } from '#/plugin';
 import type { McpConnectionManager } from '../mcp';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { ModelProvider } from '../session/provider-manager';
+import type { SessionCostTracker } from '../session/cost-tracker';
 import type { SessionGoalStore } from '../session/goal';
 import type { SessionMessageBus } from '../session/message-bus';
+import type { SessionSharedStore } from '../session/shared-store';
 import type { SessionSubagentHost } from '../session/subagent-host';
 import type { SkillRegistry } from '../skill';
 import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
@@ -35,6 +37,7 @@ import {
   type CompactionStrategy,
   type MicroCompactionConfig,
 } from './compaction';
+import type { UsageRecordCallback } from './usage';
 import { CronManager } from './cron';
 import { ConfigState } from './config';
 import { ContextMemory } from './context';
@@ -93,6 +96,9 @@ export interface AgentOptions {
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
   readonly appVersion?: string;
   readonly messageBus?: SessionMessageBus | undefined;
+  readonly sharedStore?: SessionSharedStore | undefined;
+  readonly costTracker?: SessionCostTracker | undefined;
+  readonly onUsageRecorded?: UsageRecordCallback | undefined;
 }
 
 export class Agent {
@@ -113,6 +119,8 @@ export class Agent {
   readonly telemetry: TelemetryClient;
   readonly appVersion?: string;
   readonly messageBus?: SessionMessageBus;
+  readonly sharedStore?: SessionSharedStore;
+  readonly costTracker?: SessionCostTracker;
 
   readonly blobStore: BlobStore | undefined;
   readonly records: AgentRecords;
@@ -150,6 +158,8 @@ export class Agent {
     this.hooks = options.hookEngine;
     this.appVersion = options.appVersion;
     this.messageBus = options.messageBus;
+    this.sharedStore = options.sharedStore;
+    this.costTracker = options.costTracker;
     this.log = options.log ?? log;
     this.telemetry = options.telemetry ?? noopTelemetryClient;
 
@@ -177,7 +187,7 @@ export class Agent {
     this.permission = new PermissionManager(this, options.permission);
     this.planMode = new PlanMode(this);
     this.planTracker = new PlanTracker(this, planTrackerPath(this.homedir) ?? '');
-    this.usage = new UsageRecorder(this);
+    this.usage = new UsageRecorder(this, options.onUsageRecorded);
     this.skills = options.skills ? new SkillManager(this, options.skills) : null;
     this.tools = new ToolManager(this);
     this.background = new BackgroundManager(

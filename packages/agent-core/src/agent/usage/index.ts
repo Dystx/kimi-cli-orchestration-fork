@@ -9,11 +9,19 @@ function copyUsage(usage: TokenUsage): TokenUsage {
   return { ...usage };
 }
 
+export type UsageRecordCallback = (model: string, usage: TokenUsage) => void;
+
 export class UsageRecorder {
   private readonly byModel: Record<string, TokenUsage> = {};
   private currentTurn: TokenUsage | undefined;
+  private readonly onRecord?: UsageRecordCallback;
 
-  constructor(protected readonly agent?: Agent) {}
+  constructor(
+    protected readonly agent?: Agent,
+    onRecord?: UsageRecordCallback,
+  ) {
+    this.onRecord = onRecord;
+  }
 
   beginTurn(): void {
     this.currentTurn = undefined;
@@ -37,6 +45,7 @@ export class UsageRecorder {
       this.currentTurn =
         this.currentTurn === undefined ? copyUsage(usage) : addUsage(this.currentTurn, usage);
     }
+    this.onRecord?.(model, usage);
     this.agent?.emitStatusUpdated();
   }
 
