@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 
@@ -150,6 +150,98 @@ tools:
         'profile/default/agent.yaml': 'name: agent\nsystemPromptPath: ./missing.md\n',
       }),
     ).toThrow(/Embedded agent profile source missing: profile\/default\/missing\.md/);
+  });
+
+  it('normalizes oh-my-kimi (OMK) agent profile format to native schema', async () => {
+    await write(
+      'okabe.yaml',
+      `
+version: 1
+agent:
+  name: omk-okabe-base
+  system_prompt_path: ./okabe.md
+  system_prompt_args:
+    OMK_ROLE: okabe
+  tools:
+    - Read
+    - Bash
+`,
+    );
+    await write(
+      'okabe.md',
+      'You are Okabe. Role={{ OMK_ROLE }}.',
+    );
+    await write(
+      'root.yaml',
+      `
+version: 1
+agent:
+  extend: ./okabe.yaml
+  name: omk-root
+  system_prompt_path: ./root.md
+  system_prompt_args:
+    OMK_ROLE: root
+  subagents:
+    explorer:
+      path: ./roles/explorer.yaml
+      description: Read-only exploration
+    coder:
+      path: ./roles/coder.yaml
+      description: Scoped implementation
+`,
+    );
+    await write(
+      'root.md',
+      'You are Root. Role={{ OMK_ROLE }}.',
+    );
+    await mkdir(join(workDir, 'roles'), { recursive: true });
+    await write(
+      'roles/explorer.yaml',
+      `
+version: 1
+agent:
+  extend: ../okabe.yaml
+  name: omk-explorer
+  system_prompt_args:
+    OMK_ROLE: explorer
+`,
+    );
+    await write(
+      'roles/coder.yaml',
+      `
+version: 1
+agent:
+  extend: ../okabe.yaml
+  name: omk-coder
+  system_prompt_args:
+    OMK_ROLE: coder
+`,
+    );
+
+    const profiles = await loadAgentProfilesFromDir([
+      join(workDir, 'okabe.yaml'),
+      join(workDir, 'root.yaml'),
+      join(workDir, 'roles/explorer.yaml'),
+      join(workDir, 'roles/coder.yaml'),
+    ]);
+
+    // Root profile loaded and resolved
+    expect(profiles['omk-root']).toBeDefined();
+    expect(profiles['omk-root']?.description).toBeUndefined();
+    expect(profiles['omk-root']?.subagents?.['omk-explorer']).toBe(profiles['omk-explorer']);
+    expect(profiles['omk-root']?.subagents?.['omk-coder']).toBe(profiles['omk-coder']);
+
+    // Subagent descriptions are propagated from parent declarations.
+    expect(profiles['omk-explorer']?.description).toBe('Read-only exploration');
+    expect(profiles['omk-coder']?.description).toBe('Scoped implementation');
+
+    // Inheritance works through OMK 'extend' → native 'extends'
+    const rootPrompt = profiles['omk-root']?.systemPrompt(promptContext);
+    expect(rootPrompt).toContain('Role=root');
+    expect(rootPrompt).toContain('You are Root');
+
+    // Tools inherited from okabe base
+    expect(profiles['omk-coder']?.tools).toEqual(expect.arrayContaining(['Read', 'Bash']));
   });
 });
 

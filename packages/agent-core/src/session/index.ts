@@ -59,6 +59,7 @@ export interface SessionOptions {
   readonly telemetry?: TelemetryClient | undefined;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
   readonly appVersion?: string;
+  readonly agentProfiles?: Record<string, ResolvedAgentProfile>;
 }
 
 export interface SessionSkillConfig {
@@ -183,8 +184,9 @@ export class Session {
   }
 
   async createMain() {
+    const profile = this.options.agentProfiles?.['agent'] ?? DEFAULT_AGENT_PROFILES['agent'];
     const { agent } = await this.createAgent({ type: 'main' }, {
-      profile: DEFAULT_AGENT_PROFILES['agent'],
+      profile,
     });
     // The main-agent audit sink now exists; flush any goal records queued before it.
     this.goals.flushPendingRecords();
@@ -212,7 +214,7 @@ export class Session {
     // default profile so the resumed session is usable. Native sessions always
     // replay a non-empty system prompt and never enter this branch.
     const main = this.getReadyAgent('main');
-    const profile = DEFAULT_AGENT_PROFILES['agent'];
+    const profile = this.options.agentProfiles?.['agent'] ?? DEFAULT_AGENT_PROFILES['agent'];
     if (main !== undefined && profile !== undefined && main.config.systemPrompt === '') {
       await this.bootstrapAgentProfile(main, profile);
     }

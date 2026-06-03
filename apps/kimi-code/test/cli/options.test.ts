@@ -306,9 +306,7 @@ describe('CLI options parsing', () => {
         '--quiet',
         '--final-message-only',
         '--input-format=text',
-        '--agent-file=x',
-        '--mcp-config={}',
-        '--mcp-config-file=/',
+        '--mcp-config={},',
       ]) {
         expect(() => parse([arg])).toThrow();
       }

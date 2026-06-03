@@ -28,6 +28,8 @@ export interface SDKRpcClientOptions {
   readonly skillDirs?: readonly string[];
   readonly telemetry?: TelemetryClient;
   readonly onOAuthRefresh?: (outcome: OAuthRefreshOutcome) => void;
+  readonly agentFile?: string;
+  readonly mcpConfigFile?: string;
 }
 
 export class SDKRpcClient extends SDKRpcClientBase {
@@ -69,6 +71,8 @@ export class SDKRpcClient extends SDKRpcClientBase {
       skillDirs: options.skillDirs,
       telemetry: this.telemetry,
       appVersion: this.identity?.version,
+      agentFile: options.agentFile,
+      mcpConfigFile: options.mcpConfigFile,
     });
     this.ready = sdkRpc(new ClientAPI(this));
   }

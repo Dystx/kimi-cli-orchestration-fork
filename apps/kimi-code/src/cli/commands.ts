@@ -76,7 +76,19 @@ export function createProgram(
     )
     .addOption(new Option('--yes').hideHelp().default(false))
     .addOption(new Option('--auto-approve').hideHelp().default(false))
-    .option('--plan', 'Start in plan mode.', false);
+    .option('--plan', 'Start in plan mode.', false)
+    .addOption(
+      new Option(
+        '--agent-file <file>',
+        'Load agent profiles from this YAML file. Other YAML files in the same directory are also loaded to resolve extends.',
+      ),
+    )
+    .addOption(
+      new Option(
+        '--mcp-config-file <file>',
+        'Load MCP server config from this JSON file instead of the default paths.',
+      ),
+    );
 
   registerExportCommand(program);
   registerProviderCommand(program);
@@ -117,6 +129,8 @@ export function createProgram(
       outputFormat: raw['outputFormat'] as CLIOptions['outputFormat'],
       prompt: raw['prompt'] as string | undefined,
       skillsDirs: raw['skillsDir'] as string[],
+      agentFile: raw['agentFile'] as string | undefined,
+      mcpConfigFile: raw['mcpConfigFile'] as string | undefined,
     };
 
     onMain(opts);

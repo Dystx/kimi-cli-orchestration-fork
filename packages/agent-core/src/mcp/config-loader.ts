@@ -85,7 +85,7 @@ interface ReadMcpJsonOptions {
   readonly stdioCwdBase?: string;
 }
 
-async function readMcpJson(
+export async function readMcpJson(
   filePath: string,
   options: ReadMcpJsonOptions = {},
 ): Promise<Record<string, McpServerConfig>> {

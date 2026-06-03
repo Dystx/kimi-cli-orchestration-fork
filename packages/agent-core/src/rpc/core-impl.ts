@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
+import { dirname, extname, join } from 'pathe';
 
 import { ErrorCodes, KimiError } from '#/errors';
 import { getRootLogger, log } from '#/logging/logger';
@@ -28,6 +30,11 @@ import {
 } from '../flags';
 import type { Logger } from '../logging/types';
 import { resolveSessionMcpConfig, mergeCallerMcpServers, type SessionMcpConfig } from '../mcp';
+import {
+  DEFAULT_AGENT_PROFILES,
+  loadAgentProfilesFromDir,
+  type ResolvedAgentProfile,
+} from '../profile';
 import { Session, type SessionMeta, type SessionSkillConfig } from '../session';
 import { exportSessionDirectory } from '../session/export';
 import {
@@ -112,6 +119,8 @@ export interface KimiCoreOptions {
   readonly skillDirs?: readonly string[];
   readonly telemetry?: TelemetryClient | undefined;
   readonly appVersion?: string;
+  readonly agentFile?: string | undefined;
+  readonly mcpConfigFile?: string | undefined;
 }
 
 export class KimiCore implements PromisableMethods<CoreAPI> {
@@ -133,6 +142,9 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   private pluginsReady: Promise<void>;
   private pluginsLoadError: Error | undefined;
   private readonly appVersion: string | undefined;
+  private readonly agentFile: string | undefined;
+  private readonly mcpConfigFile: string | undefined;
+  private customAgentProfiles: Record<string, ResolvedAgentProfile> | undefined;
 
   constructor(
     protected readonly rpcClient: CoreRPCClient,
@@ -156,6 +168,8 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     this.skillDirs = options.skillDirs ?? [];
     this.telemetry = options.telemetry ?? noopTelemetryClient;
     this.appVersion = options.appVersion;
+    this.agentFile = options.agentFile;
+    this.mcpConfigFile = options.mcpConfigFile;
     ensureKimiHome(this.homeDir);
     this.config = loadRuntimeConfig(this.configPath);
     this.sessionStore = new SessionStore(this.homeDir);
@@ -172,6 +186,22 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     this.sdk = rpcClient(this);
   }
 
+  private async resolveCustomAgentProfiles(): Promise<Record<string, ResolvedAgentProfile> | undefined> {
+    if (this.agentFile === undefined) return undefined;
+    if (this.customAgentProfiles !== undefined) return this.customAgentProfiles;
+
+    const dir = dirname(this.agentFile);
+    const yamlFiles = await findYamlFilesRecursive(dir);
+
+    // Always include the explicitly requested file even if scan failed.
+    if (!yamlFiles.includes(this.agentFile)) {
+      yamlFiles.push(this.agentFile);
+    }
+
+    this.customAgentProfiles = await loadAgentProfilesFromDir(yamlFiles, DEFAULT_AGENT_PROFILES);
+    return this.customAgentProfiles;
+  }
+
   async createSession(input: CreateSessionPayload): Promise<SessionSummary> {
     const options = input;
     const workDir = requiredWorkDir('createSession', options.workDir);
@@ -179,10 +209,14 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     const id = options.id ?? createSessionId();
     const thinkingLevel = resolveThinkingLevel(options.thinking, config);
     const permissionMode = options.permission ?? config.defaultPermissionMode;
-    const baseMcpConfig = await resolveSessionMcpConfig({
-      cwd: workDir,
-      homeDir: this.homeDir,
-    });
+    const [baseMcpConfig, customAgentProfiles] = await Promise.all([
+      resolveSessionMcpConfig({
+        cwd: workDir,
+        homeDir: this.homeDir,
+        customConfigFile: this.mcpConfigFile,
+      }),
+      this.resolveCustomAgentProfiles(),
+    ]);
     const withCallerMcp = mergeCallerMcpServers(baseMcpConfig, options.mcpServers);
     const summary = await this.sessionStore.create({
       id,
@@ -217,6 +251,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       telemetry: withTelemetryContext(this.telemetry, { sessionId: summary.id }),
       pluginSessionStarts,
       appVersion: this.appVersion,
+      agentProfiles: customAgentProfiles,
     });
     try {
       session.metadata = {
@@ -278,10 +313,14 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     }
 
     const config = this.reloadProviderManager();
-    const baseMcpConfig = await resolveSessionMcpConfig({
-      cwd: summary.workDir,
-      homeDir: this.homeDir,
-    });
+    const [baseMcpConfig, customAgentProfiles] = await Promise.all([
+      resolveSessionMcpConfig({
+        cwd: summary.workDir,
+        homeDir: this.homeDir,
+        customConfigFile: this.mcpConfigFile,
+      }),
+      this.resolveCustomAgentProfiles(),
+    ]);
     const withCallerMcp = mergeCallerMcpServers(baseMcpConfig, input.mcpServers);
     await this.pluginsReady;
     const pluginSessionStarts = this.plugins.enabledSessionStarts();
@@ -305,6 +344,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       initializeMainAgent: false,
       pluginSessionStarts,
       appVersion: this.appVersion,
+      agentProfiles: customAgentProfiles,
     });
     let warning: string | undefined;
     try {
@@ -835,6 +875,36 @@ function serviceCredentials(
 function nonEmptyString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+}
+
+async function findYamlFilesRecursive(dir: string): Promise<string[]> {
+  const results: string[] = [];
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return results;
+  }
+
+  for (const entry of entries) {
+    const fullPath = join(dir, entry);
+    try {
+      const s = await stat(fullPath);
+      if (s.isDirectory()) {
+        const nested = await findYamlFilesRecursive(fullPath);
+        results.push(...nested);
+      } else if (s.isFile()) {
+        const ext = extname(entry).toLowerCase();
+        if (ext === '.yaml' || ext === '.yml') {
+          results.push(fullPath);
+        }
+      }
+    } catch {
+      // Ignore inaccessible entries.
+    }
+  }
+
+  return results;
 }
 
 function requiredWorkDir(operation: string, value: string): string {

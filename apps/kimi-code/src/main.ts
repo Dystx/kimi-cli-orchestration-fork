@@ -113,6 +113,8 @@ const MIGRATE_CLI_OPTIONS: CLIOptions = {
   outputFormat: undefined,
   prompt: undefined,
   skillsDirs: [],
+  agentFile: undefined,
+  mcpConfigFile: undefined,
 };
 
 export function main(): void {

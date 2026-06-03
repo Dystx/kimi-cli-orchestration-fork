@@ -5,6 +5,8 @@ import type { SkillRegistry } from '../skill';
 
 export const RawSubagentProfileSchema = z.object({
   description: z.string().optional(),
+  /** Internal field used during OMK-format normalization to preserve subagent file paths. */
+  _omkPath: z.string().optional(),
 });
 
 export type RawSubagentProfile = z.infer<typeof RawSubagentProfileSchema>;
