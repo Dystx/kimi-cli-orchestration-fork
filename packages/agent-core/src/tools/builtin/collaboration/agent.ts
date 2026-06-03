@@ -34,6 +34,7 @@ import {
 import { AgentBackgroundTask, type BackgroundManager } from '../../../agent/background';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { matchesGlobRuleSubject } from '../../support/rule-match';
+import type { SubagentResultCache } from '../../../session/subagent-cache';
 import AGENT_BACKGROUND_DISABLED_DESCRIPTION from './agent-background-disabled.md';
 import AGENT_BACKGROUND_DESCRIPTION from './agent-background-enabled.md';
 import AGENT_DESCRIPTION_BASE from './agent.md';
@@ -132,6 +133,21 @@ export const AgentToolInputSchema = z.preprocess(
       .describe(
         'If true, the parent receives subagent.progress events after each subagent turn, showing partial results before the subagent completes. Use this for long-running subagents where seeing progress is valuable.',
       ),
+    use_cache: z
+      .boolean()
+      .optional()
+      .describe(
+        'If true, check the subagent result cache before spawning. If an identical task (same profile + prompt + cwd) was recently completed, the cached result is returned instantly. Use this for repetitive or idempotent tasks.',
+      ),
+    cache_ttl_ms: z
+      .number()
+      .int()
+      .min(1000)
+      .max(86400000)
+      .optional()
+      .describe(
+        'How long cached results remain valid in milliseconds. Defaults to 5 minutes (300000ms). Only used when use_cache is true.',
+      ),
   }),
 );
 
@@ -168,6 +184,8 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     subagents?: ResolvedAgentProfile['subagents'] | undefined,
     options?: {
       log?: Logger;
+      subagentCache?: SubagentResultCache;
+      cwd?: string;
     },
   ) {
     const log = options?.log;
@@ -179,9 +197,13 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       ? `${baseDescription}\n\nAvailable agent types (pass via subagent_type):\n${typeLines}`
       : baseDescription;
     this.log = log;
+    this.subagentCache = options?.subagentCache;
+    this.cwd = options?.cwd;
   }
 
   private readonly log?: Logger;
+  private readonly subagentCache?: SubagentResultCache;
+  private readonly cwd?: string;
 
   async resolveExecution(args: AgentToolInput): Promise<ToolExecution> {
     let profileName = args.subagent_type?.length ? args.subagent_type : 'coder';
@@ -237,6 +259,32 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
           };
         }
       }
+
+      // Check cache for identical tasks
+      const cache = this.subagentCache;
+      const cacheTtl = args.cache_ttl_ms ?? 300_000;
+      const cacheCwd = this.cwd ?? '';
+      if (args.use_cache === true && cache !== undefined && resumeAgentId === undefined) {
+        const profileName = requestedProfileName ?? 'coder';
+        const cached = cache.get(profileName, cacheCwd, args.prompt);
+        if (cached !== undefined) {
+          const lines = [
+            `agent_id: (cached)`,
+            `actual_subagent_type: ${profileName}`,
+            'status: completed (from cache)',
+            '',
+            '[summary]',
+            cached.result,
+          ];
+          if (cached.changes !== undefined && cached.changes.length > 0) {
+            lines.push('');
+            lines.push('[changes]');
+            lines.push(cached.changes);
+          }
+          return { output: lines.join('\n') };
+        }
+      }
+
       const backgroundController = runInBackground ? new AbortController() : undefined;
       const timeoutMs = args.timeout === undefined ? undefined : args.timeout * 1000;
       foregroundDeadline =
@@ -326,6 +374,23 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       while (true) {
         try {
           const result = await handle.completion;
+
+          // Store in cache if caching is enabled
+          if (args.use_cache === true && cache !== undefined && resumeAgentId === undefined) {
+            cache.set(
+              handle.profileName,
+              cacheCwd,
+              args.prompt,
+              {
+                result: result.result,
+                usage: result.usage,
+                changes: result.changes,
+                cachedAt: Date.now(),
+                ttlMs: cacheTtl,
+              },
+            );
+          }
+
           const lines = [
             `agent_id: ${handle.agentId}`,
             `actual_subagent_type: ${handle.profileName}`,

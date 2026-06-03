@@ -426,6 +426,8 @@ export class ToolManager {
             DEFAULT_AGENT_PROFILES['agent']?.subagents,
             {
               log: this.agent.log,
+              subagentCache: this.agent.subagentCache,
+              cwd: this.agent.config.cwd,
             },
           ),
         this.agent.subagentHost &&

@@ -11,6 +11,7 @@ import { proxyWithExtraPayload } from '#/rpc/types';
 import { Agent, type AgentOptions, type AgentType } from '../agent';
 import { SessionCostTracker } from './cost-tracker';
 import { SessionGoalStore, type SessionGoalState } from './goal';
+import { SubagentResultCache } from './subagent-cache';
 import { HookEngine, type HookDef } from './hooks';
 import { SessionMessageBus } from './message-bus';
 import { SessionSharedStore } from './shared-store';
@@ -116,6 +117,7 @@ export class Session {
   readonly messageBus: SessionMessageBus;
   readonly sharedStore: SessionSharedStore;
   readonly costTracker: SessionCostTracker;
+  readonly subagentCache: SubagentResultCache;
   private readonly logHandle: SessionLogHandle | undefined;
   readonly hookEngine: HookEngine;
   readonly goals: SessionGoalStore;
@@ -148,6 +150,7 @@ export class Session {
     this.messageBus = new SessionMessageBus();
     this.sharedStore = new SessionSharedStore();
     this.costTracker = new SessionCostTracker();
+    this.subagentCache = new SubagentResultCache();
     this.rpc = options.rpc;
     this.hookEngine = new HookEngine(options.hooks, {
       cwd: options.kaos.getcwd(),
@@ -492,6 +495,7 @@ export class Session {
       messageBus: this.messageBus,
       sharedStore: this.sharedStore,
       costTracker: this.costTracker,
+      subagentCache: this.subagentCache,
       onUsageRecorded: (model, usage) => this.costTracker.record(model, usage),
     });
   }

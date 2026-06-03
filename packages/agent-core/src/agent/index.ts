@@ -19,6 +19,7 @@ import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profi
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionCostTracker } from '../session/cost-tracker';
 import type { SessionGoalStore } from '../session/goal';
+import type { SubagentResultCache } from '../session/subagent-cache';
 import type { SessionMessageBus } from '../session/message-bus';
 import type { SessionSharedStore } from '../session/shared-store';
 import type { SessionSubagentHost } from '../session/subagent-host';
@@ -98,6 +99,7 @@ export interface AgentOptions {
   readonly messageBus?: SessionMessageBus | undefined;
   readonly sharedStore?: SessionSharedStore | undefined;
   readonly costTracker?: SessionCostTracker | undefined;
+  readonly subagentCache?: SubagentResultCache | undefined;
   readonly onUsageRecorded?: UsageRecordCallback | undefined;
 }
 
@@ -121,6 +123,7 @@ export class Agent {
   readonly messageBus?: SessionMessageBus;
   readonly sharedStore?: SessionSharedStore;
   readonly costTracker?: SessionCostTracker;
+  readonly subagentCache?: SubagentResultCache;
 
   readonly blobStore: BlobStore | undefined;
   readonly records: AgentRecords;
@@ -160,6 +163,7 @@ export class Agent {
     this.messageBus = options.messageBus;
     this.sharedStore = options.sharedStore;
     this.costTracker = options.costTracker;
+    this.subagentCache = options.subagentCache;
     this.log = options.log ?? log;
     this.telemetry = options.telemetry ?? noopTelemetryClient;
 
