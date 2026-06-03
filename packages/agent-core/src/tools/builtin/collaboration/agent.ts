@@ -91,6 +91,22 @@ export const AgentToolInputSchema = z.preprocess(
       .describe(
         'If true, the subagent runs in an isolated git worktree. Use this when the subagent will edit files and you want to avoid conflicts with the parent agent or other subagents. The worktree is cleaned up automatically when the subagent finishes.',
       ),
+    token_budget: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        'Maximum total tokens (input + output) the subagent may consume before being auto-killed. Use this to prevent runaway subagents from exhausting the parent context window.',
+      ),
+    time_budget_ms: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        'Maximum wall-clock milliseconds the subagent may run before being auto-killed. Use this to bound latency for time-sensitive tasks.',
+      ),
   }),
 );
 
@@ -210,6 +226,8 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         runInBackground,
         worktree: args.worktree === true,
         signal: backgroundController?.signal ?? foregroundDeadline?.signal ?? signal,
+        tokenBudget: args.token_budget,
+        timeBudgetMs: args.time_budget_ms,
       };
 
       let handle: SubagentHandle;

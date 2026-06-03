@@ -18,6 +18,7 @@ import type { McpConnectionManager } from '../mcp';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionGoalStore } from '../session/goal';
+import type { SessionMessageBus } from '../session/message-bus';
 import type { SessionSubagentHost } from '../session/subagent-host';
 import type { SkillRegistry } from '../skill';
 import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
@@ -91,6 +92,7 @@ export interface AgentOptions {
   readonly telemetry?: TelemetryClient | undefined;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
   readonly appVersion?: string;
+  readonly messageBus?: SessionMessageBus | undefined;
 }
 
 export class Agent {
@@ -110,6 +112,7 @@ export class Agent {
   readonly log: Logger;
   readonly telemetry: TelemetryClient;
   readonly appVersion?: string;
+  readonly messageBus?: SessionMessageBus;
 
   readonly blobStore: BlobStore | undefined;
   readonly records: AgentRecords;
@@ -146,6 +149,7 @@ export class Agent {
     this.goals = options.goals;
     this.hooks = options.hookEngine;
     this.appVersion = options.appVersion;
+    this.messageBus = options.messageBus;
     this.log = options.log ?? log;
     this.telemetry = options.telemetry ?? noopTelemetryClient;
 

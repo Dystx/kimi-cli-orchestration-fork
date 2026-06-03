@@ -433,6 +433,11 @@ export class ToolManager {
             this.agent.subagentHost,
             DEFAULT_AGENT_PROFILES['agent']?.subagents,
           ),
+        this.agent.subagentHost && new b.SubagentStatusTool(this.agent.subagentHost),
+        this.agent.messageBus && this.agent.subagentHost &&
+          new b.SendMessageTool(this.agent, this.agent.messageBus),
+        this.agent.messageBus && this.agent.subagentHost &&
+          new b.ReceiveMessageTool(this.agent, this.agent.messageBus),
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
       ]

@@ -29,6 +29,18 @@ const AgentBatchItemSchema = z.object({
     .string()
     .optional()
     .describe('Profile name. Defaults to "coder"'),
+  token_budget: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Maximum total tokens this subagent may consume'),
+  time_budget_ms: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Maximum wall-clock milliseconds this subagent may run'),
 });
 
 export const AgentBatchInputSchema = z.object({
@@ -89,6 +101,8 @@ export class AgentBatchTool implements BuiltinTool<AgentBatchInput> {
         description: task.description,
         runInBackground: false,
         signal,
+        tokenBudget: task.token_budget,
+        timeBudgetMs: task.time_budget_ms,
       });
       spawned.push({ index: i, description: task.description, profileName, handle });
     }

@@ -1,4 +1,4 @@
-import type { TokenUsage } from '@moonshot-ai/kosong';
+import { grandTotal, type TokenUsage } from '@moonshot-ai/kosong';
 
 import type { Agent } from '../agent';
 import type { PromptOrigin } from '../agent/context';
@@ -52,6 +52,10 @@ type RunSubagentOptions = {
   readonly origin?: PromptOrigin | undefined;
   readonly signal: AbortSignal;
   readonly worktree?: boolean | undefined;
+  /** Maximum tokens the subagent may consume before being auto-killed. */
+  readonly tokenBudget?: number | undefined;
+  /** Maximum wall-clock milliseconds the subagent may run before being auto-killed. */
+  readonly timeBudgetMs?: number | undefined;
 };
 
 type SubagentCompletion = {
@@ -64,6 +68,11 @@ type ActiveChild = {
   readonly runInBackground: boolean;
 };
 
+export type SubagentStatus =
+  | { kind: 'running'; startedAt: number }
+  | { kind: 'completed'; startedAt: number; completedAt: number; result: string; usage?: TokenUsage }
+  | { kind: 'failed'; startedAt: number; failedAt: number; error: string };
+
 export type SubagentHandle = {
   readonly agentId: string;
   readonly profileName: string;
@@ -73,12 +82,17 @@ export type SubagentHandle = {
 
 export class SessionSubagentHost {
   private readonly activeChildren = new Map<string, ActiveChild>();
+  private readonly subagentStatuses = new Map<string, SubagentStatus>();
 
   constructor(
     private readonly session: Session,
     private readonly ownerAgentId: string,
     readonly backgroundTaskTimeoutMs?: number | undefined,
   ) {}
+
+  getStatuses(): ReadonlyMap<string, SubagentStatus> {
+    return this.subagentStatuses;
+  }
 
   async spawn(profileName: string, options: RunSubagentOptions): Promise<SubagentHandle> {
     options.signal.throwIfAborted();
@@ -265,6 +279,9 @@ export class SessionSubagentHost {
       run_in_background: options.runInBackground,
     });
 
+    const startTime = Date.now();
+    this.subagentStatuses.set(childId, { kind: 'running', startedAt: startTime });
+
     try {
       await prepareChild();
       options.signal.throwIfAborted();
@@ -282,6 +299,9 @@ export class SessionSubagentHost {
       child.turn.prompt([{ type: 'text', text: childPrompt }], origin);
       await runChildTurnToCompletion(child, options.signal);
 
+      // Check budgets after each turn
+      checkBudgets(child, options, startTime);
+
       // A subagent that returns an overly terse summary leaves the parent
       // agent under-informed. Give it a bounded number of chances to expand
       // the handoff; if it is still short after that, accept it as-is rather
@@ -291,11 +311,20 @@ export class SessionSubagentHost {
       while (remainingContinuations > 0 && result.length < SUMMARY_MIN_LENGTH) {
         remainingContinuations -= 1;
         options.signal.throwIfAborted();
+        checkBudgets(child, options, startTime);
         child.turn.prompt([{ type: 'text', text: SUMMARY_CONTINUATION_PROMPT }], origin);
         await runChildTurnToCompletion(child, options.signal);
+        checkBudgets(child, options, startTime);
         result = lastAssistantText(child);
       }
       const usage = child.usage.data().total;
+      this.subagentStatuses.set(childId, {
+        kind: 'completed',
+        startedAt: startTime,
+        completedAt: Date.now(),
+        result,
+        usage,
+      });
       parent.emitEvent({
         type: 'subagent.completed',
         subagentId: childId,
@@ -308,6 +337,12 @@ export class SessionSubagentHost {
       return { result, usage };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      this.subagentStatuses.set(childId, {
+        kind: 'failed',
+        startedAt: startTime,
+        failedAt: Date.now(),
+        error: message,
+      });
       parent.emitEvent({
         type: 'subagent.failed',
         subagentId: childId,
@@ -374,6 +409,30 @@ async function runChildTurnToCompletion(child: Agent, signal: AbortSignal): Prom
     );
   }
   throwIfSubagentStoppedAtMaxTokens(completion.stopReason);
+}
+
+function checkBudgets(
+  child: Agent,
+  options: RunSubagentOptions,
+  startTime: number,
+): void {
+  if (options.tokenBudget !== undefined) {
+    const total = child.usage.data().total;
+    if (total !== undefined) {
+      const used = grandTotal(total);
+      if (used >= options.tokenBudget) {
+        throw new Error(`Subagent exceeded token budget (${used}/${options.tokenBudget})`);
+      }
+    }
+  }
+  if (options.timeBudgetMs !== undefined) {
+    const elapsed = Date.now() - startTime;
+    if (elapsed >= options.timeBudgetMs) {
+      throw new Error(
+        `Subagent exceeded time budget (${Math.round(elapsed / 1000)}s/${Math.round(options.timeBudgetMs / 1000)}s)`,
+      );
+    }
+  }
 }
 
 function throwIfSubagentStoppedAtMaxTokens(stopReason: LoopTurnStopReason | undefined): void {
