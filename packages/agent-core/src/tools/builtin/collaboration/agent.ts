@@ -148,6 +148,12 @@ export const AgentToolInputSchema = z.preprocess(
       .describe(
         'How long cached results remain valid in milliseconds. Defaults to 5 minutes (300000ms). Only used when use_cache is true.',
       ),
+    fallback_profile: z
+      .string()
+      .optional()
+      .describe(
+        'If the subagent fails after all retries, automatically retry once with this fallback profile (e.g. "explore" or "plan"). Use this for self-healing when the primary profile is ill-suited to the task.',
+      ),
   }),
 );
 
@@ -370,6 +376,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       const maxRetries = args.max_retries ?? 0;
       const baseDelayMs = args.retry_delay_ms ?? 1000;
       let attempt = 0;
+      let fallbackAttempted = false;
 
       while (true) {
         try {
@@ -450,7 +457,6 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
                 attempt,
                 error: spawnError,
               });
-              // Fall through to error handling below
               const lines = [
                 `agent_id: ${handle.agentId}`,
                 `actual_subagent_type: ${handle.profileName}`,
@@ -462,6 +468,49 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
               return { output: lines.join('\n'), isError: true };
             }
             continue;
+          }
+
+          // Self-healing: try fallback profile once if set and not yet attempted
+          const fallbackProfile = args.fallback_profile?.trim();
+          if (
+            fallbackProfile !== undefined &&
+            fallbackProfile.length > 0 &&
+            !fallbackAttempted &&
+            !isUserCancellation(signal.reason) &&
+            !(foregroundDeadline?.timedOut() === true && args.timeout !== undefined) &&
+            !isAbortError(error) &&
+            !message.includes('budget')
+          ) {
+            fallbackAttempted = true;
+            this.log?.info('subagent fallback profile', {
+              toolCallId,
+              failedProfile: handle.profileName,
+              fallbackProfile,
+              error: message,
+            });
+            try {
+              handle = await this.subagentHost.spawn(fallbackProfile, {
+                ...options,
+                parentToolCallId: toolCallId,
+              });
+              attempt = 0; // reset retries for the fallback
+              continue;
+            } catch (spawnError) {
+              this.log?.warn('subagent fallback spawn failed', {
+                toolCallId,
+                fallbackProfile,
+                error: spawnError,
+              });
+              const lines = [
+                `agent_id: ${handle.agentId}`,
+                `actual_subagent_type: ${handle.profileName}`,
+                'status: failed',
+                '',
+                `subagent error: ${message}`,
+                `fallback profile "${fallbackProfile}" spawn failed: ${spawnError instanceof Error ? spawnError.message : String(spawnError)}`,
+              ];
+              return { output: lines.join('\n'), isError: true };
+            }
           }
 
           const lines = [
