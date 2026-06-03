@@ -100,7 +100,11 @@ export interface AgentOptions {
   readonly sharedStore?: SessionSharedStore | undefined;
   readonly costTracker?: SessionCostTracker | undefined;
   readonly subagentCache?: SubagentResultCache | undefined;
+  readonly healthMonitor?: import('../session/health-monitor').SessionHealthMonitor;
   readonly onUsageRecorded?: UsageRecordCallback | undefined;
+  readonly onTurnEnded?:
+    | ((turnId: number, durationMs: number, steps: number, failed: boolean) => void)
+    | undefined;
 }
 
 export class Agent {
@@ -124,6 +128,10 @@ export class Agent {
   readonly sharedStore?: SessionSharedStore;
   readonly costTracker?: SessionCostTracker;
   readonly subagentCache?: SubagentResultCache;
+  readonly healthMonitor?: import('../session/health-monitor').SessionHealthMonitor;
+  readonly onTurnEnded?:
+    | ((turnId: number, durationMs: number, steps: number, failed: boolean) => void)
+    | undefined;
 
   readonly blobStore: BlobStore | undefined;
   readonly records: AgentRecords;
@@ -164,6 +172,8 @@ export class Agent {
     this.sharedStore = options.sharedStore;
     this.costTracker = options.costTracker;
     this.subagentCache = options.subagentCache;
+    this.healthMonitor = options.healthMonitor;
+    this.onTurnEnded = options.onTurnEnded;
     this.log = options.log ?? log;
     this.telemetry = options.telemetry ?? noopTelemetryClient;
 

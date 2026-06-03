@@ -12,6 +12,7 @@ import { Agent, type AgentOptions, type AgentType } from '../agent';
 import { SessionCostTracker } from './cost-tracker';
 import { SessionGoalStore, type SessionGoalState } from './goal';
 import { SubagentResultCache } from './subagent-cache';
+import { SessionHealthMonitor } from './health-monitor';
 import { HookEngine, type HookDef } from './hooks';
 import { SessionMessageBus } from './message-bus';
 import { SessionSharedStore } from './shared-store';
@@ -118,6 +119,7 @@ export class Session {
   readonly sharedStore: SessionSharedStore;
   readonly costTracker: SessionCostTracker;
   readonly subagentCache: SubagentResultCache;
+  readonly healthMonitor: SessionHealthMonitor;
   private readonly logHandle: SessionLogHandle | undefined;
   readonly hookEngine: HookEngine;
   readonly goals: SessionGoalStore;
@@ -151,6 +153,7 @@ export class Session {
     this.sharedStore = new SessionSharedStore();
     this.costTracker = new SessionCostTracker();
     this.subagentCache = new SubagentResultCache();
+    this.healthMonitor = new SessionHealthMonitor();
     this.rpc = options.rpc;
     this.hookEngine = new HookEngine(options.hooks, {
       cwd: options.kaos.getcwd(),
@@ -496,7 +499,14 @@ export class Session {
       sharedStore: this.sharedStore,
       costTracker: this.costTracker,
       subagentCache: this.subagentCache,
-      onUsageRecorded: (model, usage) => this.costTracker.record(model, usage),
+      healthMonitor: this.healthMonitor,
+      onUsageRecorded: (model, usage) => {
+        this.costTracker.record(model, usage);
+        this.healthMonitor.recordUsage(model, usage);
+      },
+      onTurnEnded: (turnId, durationMs, steps, failed) => {
+        this.healthMonitor.recordTurn(durationMs, steps, failed);
+      },
     });
   }
 

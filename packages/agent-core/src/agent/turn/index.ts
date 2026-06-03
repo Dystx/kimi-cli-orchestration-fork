@@ -486,6 +486,12 @@ export class TurnFlow {
     this.currentStepByTurn.delete(turnId);
     this.interruptedTelemetryTurnIds.delete(turnId);
     this.stepFailureByTurn.delete(turnId);
+
+    const durationMs = Date.now() - startedAt;
+    const steps = this.currentStepByTurn.get(turnId) ?? this.currentStep;
+    const failed = ended.reason === 'failed';
+    this.agent.onTurnEnded?.(turnId, durationMs, steps, failed);
+
     return { event: ended, stopReason: completedStopReason, blockedByUserPromptHook };
   }
 

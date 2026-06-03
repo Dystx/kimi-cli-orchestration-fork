@@ -445,6 +445,7 @@ export class ToolManager {
         this.agent.sharedStore && new b.ListSharedStateTool(this.agent.sharedStore),
         this.agent.type === 'main' && this.agent.costTracker && new b.SetCostBudgetTool(this.agent.costTracker),
         this.agent.type === 'main' && this.agent.costTracker && new b.GetCostStatusTool(this.agent.costTracker),
+        this.agent.type === 'main' && this.agent.healthMonitor && new b.GetSessionHealthTool(this.agent.healthMonitor),
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
         new b.BuildCodeIndexTool(kaos),

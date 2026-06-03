@@ -8,6 +8,7 @@ export * from './collaboration/agent';
 export * from './collaboration/agent-batch';
 export * from './collaboration/ask-user';
 export * from './collaboration/get-cost-status';
+export * from './collaboration/get-session-health';
 export * from './collaboration/list-shared-state';
 export * from './collaboration/read-shared-state';
 export * from './collaboration/receive-message';
