@@ -9,17 +9,18 @@ const AGENTS_MD_MAX_BYTES = 32 * 1024;
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
 
-export type PreparedSystemPromptContext = Pick<SystemPromptContext, 'cwdListing' | 'agentsMd' | 'memory'>;
+export type PreparedSystemPromptContext = Pick<SystemPromptContext, 'cwdListing' | 'agentsMd' | 'soulMd' | 'memory'>;
 
 export async function prepareSystemPromptContext(
   kaos: Kaos,
 ): Promise<PreparedSystemPromptContext> {
-  const [cwdListing, agentsMd, memory] = await Promise.all([
+  const [cwdListing, agentsMd, soulMd, memory] = await Promise.all([
     listDirectory(kaos),
     loadAgentsMd(kaos),
+    loadSoulMd(kaos),
     loadMemoryMd(kaos),
   ]);
-  return { cwdListing, agentsMd, memory };
+  return { cwdListing, agentsMd, soulMd, memory };
 }
 
 export async function loadAgentsMd(kaos: Kaos): Promise<string> {
@@ -117,6 +118,19 @@ async function isFile(kaos: Kaos, path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function loadSoulMd(kaos: Kaos): Promise<string> {
+  const home = kaos.gethome();
+  const candidates = [
+    join(home, '.kimi-code', 'SOUL.md'),
+    join(home, '.kimi-code', 'soul.md'),
+  ];
+  for (const path of candidates) {
+    const file = await readAgentFile(kaos, path);
+    if (file !== undefined) return renderAgentFiles([file]);
+  }
+  return '';
 }
 
 async function loadMemoryMd(kaos: Kaos): Promise<string> {
