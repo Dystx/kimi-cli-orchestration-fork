@@ -20,6 +20,7 @@ import { SessionSharedStore } from './shared-store';
 import { SessionTaskRegistry } from './task-registry';
 import { SessionFileLock } from './file-lock';
 import { SessionOutcomeTracker } from './outcome-tracker';
+import { SessionLearningEngine } from './learning-engine';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
 import { parseBooleanEnv, resolveConfigValue, type BackgroundConfig } from '../config';
 import { makeErrorPayload } from '../errors';
@@ -127,6 +128,7 @@ export class Session {
   readonly taskRegistry: SessionTaskRegistry;
   readonly fileLock: SessionFileLock;
   readonly outcomeTracker: SessionOutcomeTracker;
+  readonly learningEngine: SessionLearningEngine;
   private readonly logHandle: SessionLogHandle | undefined;
   readonly hookEngine: HookEngine;
   readonly goals: SessionGoalStore;
@@ -164,6 +166,7 @@ export class Session {
     this.taskRegistry = new SessionTaskRegistry();
     this.fileLock = new SessionFileLock();
     this.outcomeTracker = new SessionOutcomeTracker();
+    this.learningEngine = new SessionLearningEngine(options.homedir, this.outcomeTracker);
     this.rpc = options.rpc;
     this.hookEngine = new HookEngine(options.hooks, {
       cwd: options.kaos.getcwd(),
@@ -511,6 +514,7 @@ export class Session {
       subagentCache: this.subagentCache,
       healthMonitor: this.healthMonitor,
       outcomeTracker: this.outcomeTracker,
+      learningEngine: this.learningEngine,
       taskRegistry: this.taskRegistry,
       fileLock: this.fileLock,
       onUsageRecorded: (model, usage) => {
@@ -651,6 +655,16 @@ export class Session {
       }
     } catch {
       // Silently ignore reflection write failures
+    }
+
+    // Auto-run learning engine to generate draft skills
+    try {
+      const report = await this.learningEngine.analyze();
+      if (report.draftSkills.length > 0) {
+        await this.learningEngine.writeDrafts(report);
+      }
+    } catch {
+      // Silently ignore learning failures
     }
   }
 }

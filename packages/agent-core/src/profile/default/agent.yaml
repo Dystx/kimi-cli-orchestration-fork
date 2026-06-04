@@ -43,6 +43,9 @@ tools:
   - GetCostStatus
   - GetSessionHealth
   - GetPerformanceReport
+  - LearnFromSession
+  - ReviewDraftSkills
+  - PromoteDraftSkill
   - RegisterHook
   - ListHooks
   - RemoveHook

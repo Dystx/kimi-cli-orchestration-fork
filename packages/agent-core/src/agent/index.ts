@@ -102,6 +102,7 @@ export interface AgentOptions {
   readonly subagentCache?: SubagentResultCache | undefined;
   readonly healthMonitor?: import('../session/health-monitor').SessionHealthMonitor;
   readonly outcomeTracker?: import('../session/outcome-tracker').SessionOutcomeTracker;
+  readonly learningEngine?: import('../session/learning-engine').SessionLearningEngine;
   readonly taskRegistry?: import('../session/task-registry').SessionTaskRegistry;
   readonly fileLock?: import('../session/file-lock').SessionFileLock;
   readonly onUsageRecorded?: UsageRecordCallback | undefined;
@@ -148,6 +149,7 @@ export class Agent {
   readonly subagentCache?: SubagentResultCache;
   readonly healthMonitor?: import('../session/health-monitor').SessionHealthMonitor;
   readonly outcomeTracker?: import('../session/outcome-tracker').SessionOutcomeTracker;
+  readonly learningEngine?: import('../session/learning-engine').SessionLearningEngine;
   readonly taskRegistry?: import('../session/task-registry').SessionTaskRegistry;
   readonly fileLock?: import('../session/file-lock').SessionFileLock;
   readonly onTurnEnded?:
@@ -210,6 +212,7 @@ export class Agent {
     this.subagentCache = options.subagentCache;
     this.healthMonitor = options.healthMonitor;
     this.outcomeTracker = options.outcomeTracker;
+    this.learningEngine = options.learningEngine;
     this.taskRegistry = options.taskRegistry;
     this.fileLock = options.fileLock;
     this.onTurnEnded = options.onTurnEnded;
