@@ -47,6 +47,7 @@ export const ErrorCodes = {
   AUTH_LOGIN_REQUIRED: 'auth.login_required',
 
   CONTEXT_OVERFLOW: 'context.overflow',
+  BUDGET_EXCEEDED: 'budget.exceeded',
   LOOP_MAX_STEPS_EXCEEDED: 'loop.max_steps_exceeded',
   PROVIDER_API_ERROR: 'provider.api_error',
   PROVIDER_RATE_LIMIT: 'provider.rate_limit',
@@ -296,6 +297,12 @@ export const KIMI_ERROR_INFO = {
     retryable: true,
     public: true,
     action: 'Compact the conversation or start a new session.',
+  },
+  'budget.exceeded': {
+    title: 'Session cost budget exceeded',
+    retryable: false,
+    public: true,
+    action: 'Increase the session budget or switch to a cheaper model.',
   },
   'loop.max_steps_exceeded': {
     title: 'Turn exceeded max steps',

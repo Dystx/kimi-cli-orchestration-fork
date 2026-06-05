@@ -5,7 +5,7 @@ import { SkillParseError, UnsupportedSkillTypeError, parseSkillFromFile } from '
 import type { SkillDefinition, SkillRoot, SkillSource, SkippedSkill } from './types';
 import { normalizeSkillName } from './types';
 
-const USER_BRAND_DIRS = ['.kimi-code/skills'] as const;
+const USER_BRAND_DIRS = ['.kimi-code/skills', 'skills'] as const;
 const USER_GENERIC_DIRS = ['.agents/skills'] as const;
 const PROJECT_BRAND_DIRS = ['.kimi-code/skills'] as const;
 const PROJECT_GENERIC_DIRS = ['.agents/skills'] as const;

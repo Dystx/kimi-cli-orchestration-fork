@@ -1,3 +1,6 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'pathe';
+
 export interface SharedStoreEntry {
   readonly value: unknown;
   readonly createdAt: number;
@@ -70,6 +73,29 @@ export class SessionSharedStore {
       if (entry.ttlMs !== undefined && now - entry.updatedAt > entry.ttlMs) {
         this.data.delete(key);
       }
+    }
+  }
+
+  async save(homedir: string): Promise<void> {
+    const path = join(homedir, '.omk', 'state', 'shared-store.json');
+    await mkdir(dirname(path), { recursive: true });
+    const data: Record<string, SharedStoreEntry> = {};
+    for (const [key, entry] of this.data) {
+      data[key] = entry;
+    }
+    await writeFile(path, JSON.stringify(data), 'utf-8');
+  }
+
+  async load(homedir: string): Promise<void> {
+    try {
+      const path = join(homedir, '.omk', 'state', 'shared-store.json');
+      const text = await readFile(path, 'utf-8');
+      const data = JSON.parse(text) as Record<string, SharedStoreEntry>;
+      for (const [key, entry] of Object.entries(data)) {
+        this.data.set(key, entry);
+      }
+    } catch {
+      // ignore
     }
   }
 }

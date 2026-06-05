@@ -170,6 +170,13 @@ export class Session {
     this.fileLock = new SessionFileLock();
     this.outcomeTracker = new SessionOutcomeTracker();
     this.learningEngine = new SessionLearningEngine(options.homedir, this.outcomeTracker);
+
+    // Load persisted store states
+    void this.messageBus.load(options.homedir).catch(() => {});
+    void this.sharedStore.load(options.homedir).catch(() => {});
+    void this.taskRegistry.load(options.homedir).catch(() => {});
+    void this.fileLock.load(options.homedir).catch(() => {});
+
     this.rpc = options.rpc;
     this.experimentalFlags = options.experimentalFlags ?? new FlagResolver();
     this.hookEngine = new HookEngine(options.hooks, {
@@ -262,6 +269,12 @@ export class Session {
       await this.stopBackgroundTasksOnExit();
       await this.flushMetadata();
       await this.triggerSessionEnd('exit');
+      await Promise.all([
+        this.taskRegistry.save(this.options.homedir),
+        this.fileLock.save(this.options.homedir),
+        this.messageBus.save(this.options.homedir),
+        this.sharedStore.save(this.options.homedir),
+      ]).catch(() => {});
     } finally {
       try {
         await this.mcp.shutdown();
@@ -539,6 +552,13 @@ export class Session {
       onUsageRecorded: (model, usage) => {
         this.costTracker.record(model, usage);
         this.healthMonitor.recordUsage(model, usage);
+        const budgetAlert = this.costTracker.checkBudget();
+        if (budgetAlert.level === 'exceeded') {
+          throw new KimiError(ErrorCodes.BUDGET_EXCEEDED, budgetAlert.message ?? 'Session cost budget exceeded');
+        }
+        if (budgetAlert.level === 'warn' && budgetAlert.message !== undefined) {
+          this.log.warn(budgetAlert.message);
+        }
       },
       onTurnEnded: (turnId, durationMs, steps, failed) => {
         this.healthMonitor.recordTurn(durationMs, steps, failed);

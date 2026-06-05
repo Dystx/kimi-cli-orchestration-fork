@@ -1,3 +1,6 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'pathe';
+
 /**
  * SessionFileLock — cross-agent file locking to prevent conflicting edits.
  *
@@ -74,5 +77,26 @@ export class SessionFileLock {
 
   private normalizePath(path: string): string {
     return path.replace(/\\/g, '/').replace(/\/+/g, '/');
+  }
+
+  async save(homedir: string): Promise<void> {
+    const path = join(homedir, '.omk', 'state', 'file-locks.json');
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify({ locks: Array.from(this.locks.values()) }), 'utf-8');
+  }
+
+  async load(homedir: string): Promise<void> {
+    try {
+      const path = join(homedir, '.omk', 'state', 'file-locks.json');
+      const text = await readFile(path, 'utf-8');
+      const data = JSON.parse(text) as { locks?: FileLock[] };
+      if (Array.isArray(data.locks)) {
+        for (const lock of data.locks) {
+          this.locks.set(lock.path, lock);
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 }

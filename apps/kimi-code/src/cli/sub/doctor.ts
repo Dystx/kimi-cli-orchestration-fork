@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { isAbsolute, join, resolve } from 'node:path';
 
 import {
   createKimiConfigRpc,
@@ -44,7 +45,7 @@ interface CheckSpec {
 }
 
 interface CheckResult {
-  readonly label: CheckSpec['label'];
+  readonly label: CheckSpec['label'] | 'SOUL.md';
   readonly path: string;
   readonly status: 'OK' | 'SKIP' | 'ERROR';
   readonly message?: string;
@@ -67,6 +68,16 @@ export async function handleDoctor(deps: DoctorDeps, options: DoctorOptions): Pr
   const cwd = resolved.cwd();
   const specs = await buildCheckSpecs(resolved, options, cwd);
   const results = await Promise.all(specs.map((spec) => checkTomlFile(resolved, spec)));
+
+  // SOUL.md check
+  const soulPath = join(homedir(), '.kimi-code', 'SOUL.md');
+  const soulExists = existsSync(soulPath);
+  results.push({
+    label: 'SOUL.md',
+    path: soulPath,
+    status: soulExists ? 'OK' : 'SKIP',
+    message: soulExists ? 'SOUL.md found' : 'SOUL.md not found (optional)',
+  });
 
   const issueCount = results.filter((result) => result.status === 'ERROR').length;
   const text = issueCount === 0 ? formatSuccess(results) : formatFailure(results, issueCount);

@@ -16,6 +16,8 @@ kimi-code has two TOML config files, both under `~/.kimi-code/` (or under `KIMI_
 
 The "read → copy → Edit → validate → back up → overwrite" flow below applies to both files; only **which reload command applies** differs (see Capability 4).
 
+> **SOUL.md is separate** — `~/.kimi-code/SOUL.md` (or under `$KIMI_CODE_HOME`) defines your agent's personality, preferences, and persistent behavioral instructions. It is **not** a TOML config file and should be edited directly when the user wants to change personality traits or long-term preferences. Do not use the update-config flow for SOUL.md.
+
 ## Prerequisite 1: the official docs are the single source of truth
 
 Before touching any config, use **FetchURL** to fetch the official config docs as the one authoritative reference for fields (key names, types, allowed values, owning section):

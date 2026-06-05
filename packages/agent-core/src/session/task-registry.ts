@@ -1,3 +1,6 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'pathe';
+
 /**
  * SessionTaskRegistry — shared task list with dependency tracking for
  * multi-agent coordination.
@@ -134,6 +137,34 @@ export class SessionTaskRegistry {
       } else if (!shouldBeBlocked && task.status === 'blocked') {
         this.tasks.set(id, { ...task, status: 'pending', updatedAt: Date.now() });
       }
+    }
+  }
+
+  async save(homedir: string): Promise<void> {
+    const path = join(homedir, '.omk', 'state', 'tasks.json');
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({ tasks: Array.from(this.tasks.values()), idCounter: this.idCounter }),
+      'utf-8',
+    );
+  }
+
+  async load(homedir: string): Promise<void> {
+    try {
+      const path = join(homedir, '.omk', 'state', 'tasks.json');
+      const text = await readFile(path, 'utf-8');
+      const data = JSON.parse(text) as { tasks?: Task[]; idCounter?: number };
+      if (Array.isArray(data.tasks)) {
+        for (const task of data.tasks) {
+          this.tasks.set(task.id, task);
+        }
+      }
+      if (typeof data.idCounter === 'number') {
+        this.idCounter = data.idCounter;
+      }
+    } catch {
+      // ignore
     }
   }
 }

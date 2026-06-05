@@ -1,3 +1,6 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'pathe';
+
 export interface AgentMessage {
   readonly id: string;
   readonly from: string;
@@ -35,5 +38,28 @@ export class SessionMessageBus {
 
   clear(): void {
     this.queues.clear();
+  }
+
+  async save(homedir: string): Promise<void> {
+    const path = join(homedir, '.omk', 'state', 'messages.json');
+    await mkdir(dirname(path), { recursive: true });
+    const data: Record<string, AgentMessage[]> = {};
+    for (const [agentId, messages] of this.queues) {
+      data[agentId] = messages;
+    }
+    await writeFile(path, JSON.stringify(data), 'utf-8');
+  }
+
+  async load(homedir: string): Promise<void> {
+    try {
+      const path = join(homedir, '.omk', 'state', 'messages.json');
+      const text = await readFile(path, 'utf-8');
+      const data = JSON.parse(text) as Record<string, AgentMessage[]>;
+      for (const [agentId, messages] of Object.entries(data)) {
+        this.queues.set(agentId, messages);
+      }
+    } catch {
+      // ignore
+    }
   }
 }
