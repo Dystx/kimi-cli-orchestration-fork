@@ -26,11 +26,6 @@ import type { SessionSharedStore } from '../session/shared-store';
 import type { SessionSubagentHost } from '../session/subagent-host';
 import type { SkillRegistry } from '../skill';
 import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
-import {
-  estimateTokens,
-  estimateTokensForMessages,
-  estimateTokensForTools,
-} from '../utils/tokens';
 import type { PromisableMethods } from '../utils/types';
 import { BackgroundManager, BackgroundTaskPersistence } from './background';
 import {
@@ -285,7 +280,9 @@ export class Agent {
 
   get llm(): KosongLLM {
     const model = this.config.model;
-    const provider = this.config.provider.withThinking(this.config.thinkingLevel);
+    // All provider-level request config (thinking, sampling params, thinking.keep)
+    // is applied in ConfigState.provider so compaction shares it. See get provider().
+    const provider = this.config.provider;
     const loopControl = this.kimiConfig?.loopControl;
     const completionBudgetConfig = resolveCompletionBudget({
       maxOutputSize: this.config.maxOutputSize,
@@ -325,12 +322,7 @@ export class Agent {
     for (const message of history) {
       if (message.partial === true) partialMessageCount += 1;
     }
-    const requestMetadata: LlmRequestMetadata = {
-      estimatedInputTokens:
-        estimateTokens(systemPrompt) +
-        estimateTokensForMessages(history) +
-        estimateTokensForTools(tools),
-    };
+    const requestMetadata: LlmRequestMetadata = {};
     if (partialMessageCount > 0) {
       requestMetadata.partialMessageCount = partialMessageCount;
     }
@@ -538,7 +530,6 @@ interface LlmRequestContextFields {
 }
 
 interface LlmRequestMetadata {
-  estimatedInputTokens: number;
   partialMessageCount?: number;
 }
 

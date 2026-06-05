@@ -2,7 +2,45 @@
 
 本页记录 Kimi Code CLI 每个版本的变更内容。
 
-## 0.10.0
+## 0.11.0（2026-06-05）
+
+### 新功能
+
+- 新增由环境变量 `KIMI_CODE_EXPERIMENTAL_SUB_SKILL` 控制的实验性子 Skill 发现能力。随附 `sub-skill` 内置包（`sub-skill.review`、`sub-skill.consolidate`），用于盘点 Skill 并将其整理为分层分组。
+- 新增以下环境变量：
+
+  - `KIMI_MODEL_TEMPERATURE`、`KIMI_MODEL_TOP_P` —— 全局应用于任意 `kimi` 供应商的采样参数（不绑定到 `KIMI_MODEL_NAME`）。
+  - `KIMI_MODEL_THINKING_KEEP` —— Moonshot 的 preserved-thinking 透传（`thinking.keep`），仅在开启 Thinking 时注入。
+  - `KIMI_CODE_NO_AUTO_UPDATE`（旧别名 `KIMI_CLI_NO_AUTO_UPDATE`）—— 完全禁用更新预检（不检查、不后台安装、不提示）。
+- 将内置 Skill 显示为直接斜杠命令，并将其分组排在外部 Skill 命令之前。
+
+### 修复
+
+- 修复斜杠命令自动补全，让光标位于已有文本之前时也能提交目标文本。
+- 修复已排队目标在晋升尝试失败时会丢失或重复的问题。
+- 修复编辑或粘贴已排队目标时的待处理目标队列处理。
+- 在 YOLO 模式下启动目标前进行询问，方便用户切换到 Auto 来处理无人值守工作。
+- 当响应在产生可见输出前被拦截时，显示简洁的供应商过滤错误。
+- 输入无效子命令时显示 “unknown command” 而不是 “too many arguments”。
+- 将 OpenAI Chat Completions 的 `xhigh` 和 `max` thinking effort 限制为 `high`，除非模型在 `v1/chat/completions` 上支持 `xhigh`。
+- 在压缩长对话时保留 thinking effort。
+- 当能力变化而模型 ID 未变化时刷新供应商模型元数据。
+
+### 优化
+
+- 让待处理目标的确认样式与目标生命周期消息使用相同的强调处理。
+- 当没有活跃目标需要等待时立即启动待处理目标。
+  支持在管理待处理目标时进行多行编辑。
+- 为子 Agent 使用固定的 30 分钟超时，并在超时后显示简洁的恢复说明。
+- 输入斜杠命令时高亮目标队列子命令。
+
+## 0.10.1（2026-06-05）
+
+### 修复
+
+- 修复在 TUI 中启动目标时的崩溃问题。
+
+## 0.10.0（2026-06-04）
 
 ### 新功能
 
@@ -36,11 +74,11 @@
 
 - 在 Windows 安装说明中补充 Git Bash 前置条件。
 
-## 0.9.0
+## 0.9.0（2026-06-03）
 
 ### 新功能
 
-- 支持 `kimi acp` 子命令：kimi-code 现在可通过 stdio 使用 [Agent Client Protocol 0.23](https://agentclientprotocol.com/)，因此 IDE（Zed、JetBrains AI Chat、自定义客户端）可以直接驱动会话；覆盖矩阵、Zed 配置和破坏性预发布说明见 [kimi acp 子命令页面](https://moonshotai.github.io/kimi-code/en/reference/kimi-acp.html)。
+- 支持 `kimi acp` 子命令：kimi-code 现在可通过 stdio 使用 [Agent Client Protocol 0.23](https://agentclientprotocol.com/)，因此 IDE（Zed、JetBrains AI Chat、自定义客户端）可以直接驱动会话；覆盖矩阵、Zed 配置和破坏性预发布说明见 [kimi acp 子命令页面](https://moonshotai.github.io/kimi-code/zh/reference/kimi-acp.html)。
 - 新增 `/btw`，用于进行不会引导当前主轮次的侧通道对话，并允许 `/btw` 在输入问题前打开侧通道面板。
 
 ### 修复
@@ -60,7 +98,7 @@
 
 - 允许 SDK 运行时创建使用单独的 RPC client，同时保留本地 CLI 启动流程。
 
-## 0.8.0
+## 0.8.0（2026-06-02）
 
 ### 新功能
 
@@ -106,7 +144,7 @@
 
 - 将后台任务管理统一到 Agent 后台运行时中。
 
-## 0.7.0
+## 0.7.0（2026-06-02）
 
 ### 新功能
 
@@ -124,7 +162,7 @@
 - 明确 Kimi Platform API 密钥登录的标签和提示细节。
 - 优化终端界面中的一处细微视觉交互。
 
-## 0.6.0
+## 0.6.0（2026-05-29）
 
 ### 新功能
 
@@ -161,7 +199,7 @@
 - 精简 LLM 诊断日志，使用更少、更紧凑的字段。
 - 将共享的工具服务类型定义迁移到工具支持层。
 
-## 0.5.0
+## 0.5.0（2026-05-28）
 
 ### 新功能
 
@@ -195,7 +233,7 @@
 
 - 重构终端界面的代码结构。
 
-## 0.4.0
+## 0.4.0（2026-05-27）
 
 ### 新功能
 
@@ -222,7 +260,7 @@
 
 - 增强 `kimi export`，在 manifest 中记录更多诊断信息。
 
-## 0.3.0
+## 0.3.0（2026-05-26）
 
 ### 新功能
 
@@ -250,7 +288,7 @@
 
 - 改进 `Write` 工具的交互体验。
 
-## 0.2.0
+## 0.2.0（2026-05-26）
 
 ### 新功能
 
