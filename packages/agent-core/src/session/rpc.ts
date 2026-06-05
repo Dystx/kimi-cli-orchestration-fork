@@ -31,7 +31,6 @@ import type {
 import type { PromisableMethods } from '#/utils/types';
 
 import type { Session, SessionMeta } from '.';
-import { flags } from '../flags';
 import {
   promptMetadataTextFromPayload,
   promptMetadataTextFromSkill,
@@ -148,8 +147,8 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
   }
 
   private assertGoalCommandEnabled(): void {
-    // Goal command is now always enabled.
-    return;
+    if (this.session.experimentalFlags.enabled('goal_command')) return;
+    throw new KimiError(ErrorCodes.NOT_IMPLEMENTED, 'Goal command is disabled');
   }
 
   async prompt({ agentId, ...payload }: AgentScopedPayload<PromptPayload>) {

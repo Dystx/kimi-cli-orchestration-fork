@@ -1,6 +1,7 @@
 import {
   resolveSkillCommand,
   resolveSlashCommandInput,
+  setExperimentalFeatures,
   slashBusyMessage,
   slashCommandBusyReason,
 } from '#/tui/commands/index';
@@ -45,6 +46,11 @@ describe('resolveSlashCommandInput', () => {
       name: 'btw',
       args: 'what are you doing?',
     });
+    expect(resolve('/experiments')).toMatchObject({
+      kind: 'builtin',
+      name: 'experiments',
+      args: '',
+    });
   });
 
   it('blocks idle-only built-ins while streaming', () => {
@@ -73,6 +79,16 @@ describe('resolveSlashCommandInput', () => {
       commandName: 'undo',
       reason: 'streaming',
     });
+    expect(resolve('/reload', { isStreaming: true })).toEqual({
+      kind: 'blocked',
+      commandName: 'reload',
+      reason: 'streaming',
+    });
+    expect(resolve('/experiments', { isStreaming: true })).toEqual({
+      kind: 'blocked',
+      commandName: 'experiments',
+      reason: 'streaming',
+    });
   });
 
   it('blocks model and session pickers while compacting', () => {
@@ -84,6 +100,16 @@ describe('resolveSlashCommandInput', () => {
     expect(resolve('/resume', { isCompacting: true })).toEqual({
       kind: 'blocked',
       commandName: 'resume',
+      reason: 'compacting',
+    });
+    expect(resolve('/reload', { isCompacting: true })).toEqual({
+      kind: 'blocked',
+      commandName: 'reload',
+      reason: 'compacting',
+    });
+    expect(resolve('/experiments', { isCompacting: true })).toEqual({
+      kind: 'blocked',
+      commandName: 'experiments',
       reason: 'compacting',
     });
   });
@@ -102,6 +128,16 @@ describe('resolveSlashCommandInput', () => {
     expect(resolve('/mcp', { isCompacting: true })).toMatchObject({
       kind: 'builtin',
       name: 'mcp',
+      args: '',
+    });
+    expect(resolve('/reload-tui', { isStreaming: true })).toMatchObject({
+      kind: 'builtin',
+      name: 'reload-tui',
+      args: '',
+    });
+    expect(resolve('/reload-tui', { isCompacting: true })).toMatchObject({
+      kind: 'builtin',
+      name: 'reload-tui',
       args: '',
     });
     expect(resolve('/btw side question', { isStreaming: true })).toMatchObject({
@@ -145,7 +181,12 @@ describe('resolveSlashCommandInput', () => {
 });
 
 describe('goal command resolution', () => {
-  it('resolves /goal to the builtin command', () => {
+  afterEach(() => {
+    setExperimentalFeatures([]);
+  });
+
+  it('resolves /goal to the builtin command when goal_command is enabled', () => {
+    setExperimentalFeatures([{ id: 'goal_command', enabled: true }]);
     expect(resolve('/goal Ship feature X')).toMatchObject({
       kind: 'builtin',
       name: 'goal',
@@ -153,7 +194,16 @@ describe('goal command resolution', () => {
     });
   });
 
+  it('treats /goal as a normal message when goal_command is disabled', () => {
+    setExperimentalFeatures([]);
+    expect(resolve('/goal Ship feature X')).toEqual({
+      kind: 'message',
+      input: '/goal Ship feature X',
+    });
+  });
+
   it('blocks goal creation while streaming', () => {
+    setExperimentalFeatures([{ id: 'goal_command', enabled: true }]);
     expect(resolve('/goal Ship feature X', { isStreaming: true })).toEqual({
       kind: 'blocked',
       commandName: 'goal',
@@ -162,6 +212,7 @@ describe('goal command resolution', () => {
   });
 
   it('does not block status/pause/cancel/bare goal while streaming', () => {
+    setExperimentalFeatures([{ id: 'goal_command', enabled: true }]);
     for (const sub of ['status', 'pause', 'cancel']) {
       expect(resolve(`/goal ${sub}`, { isStreaming: true })).toMatchObject({
         kind: 'builtin',

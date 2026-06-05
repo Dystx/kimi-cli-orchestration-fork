@@ -1,5 +1,4 @@
 import type { Agent } from '..';
-import { flags } from '../../flags';
 import { GoalInjector } from './goal';
 import type { DynamicInjector } from './injector';
 import { PermissionModeInjector } from './permission-mode';
@@ -40,7 +39,7 @@ export class InjectionManager {
    * mode is off, the agent is not the main agent, or there is nothing to inject.
    */
   async injectGoal(): Promise<void> {
-    await this.goalInjector?.inject();
+    await this.activeGoalInjector()?.inject();
   }
 
   onContextClear(): void {
@@ -67,6 +66,12 @@ export class InjectionManager {
 
   /** Per-step injectors plus the boundary goal injector, for lifecycle events. */
   private lifecycleInjectors(): DynamicInjector[] {
-    return this.goalInjector === null ? this.injectors : [this.goalInjector, ...this.injectors];
+    const goalInjector = this.activeGoalInjector();
+    return goalInjector === null ? this.injectors : [goalInjector, ...this.injectors];
+  }
+
+  private activeGoalInjector(): GoalInjector | null {
+    if (!this.agent.experimentalFlags.enabled('goal_command')) return null;
+    return this.goalInjector;
   }
 }

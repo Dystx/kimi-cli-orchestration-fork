@@ -15,6 +15,7 @@ import {
 import type { EnabledPluginSessionStart } from '#/plugin';
 
 import type { McpConnectionManager } from '../mcp';
+import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionCostTracker } from '../session/cost-tracker';
@@ -124,6 +125,7 @@ export interface AgentOptions {
         },
       ) => void)
     | undefined;
+  readonly experimentalFlags?: ExperimentalFlagResolver;
 }
 
 export class Agent {
@@ -170,6 +172,7 @@ export class Agent {
         },
       ) => void)
     | undefined;
+  readonly experimentalFlags: ExperimentalFlagResolver;
 
   readonly blobStore: BlobStore | undefined;
   readonly records: AgentRecords;
@@ -220,6 +223,7 @@ export class Agent {
     this.onSubagentCompleted = options.onSubagentCompleted;
     this.log = options.log ?? log;
     this.telemetry = options.telemetry ?? noopTelemetryClient;
+    this.experimentalFlags = options.experimentalFlags ?? new FlagResolver();
 
     this.blobStore = options.homedir
       ? new BlobStore({ blobsDir: join(options.homedir, 'blobs') })

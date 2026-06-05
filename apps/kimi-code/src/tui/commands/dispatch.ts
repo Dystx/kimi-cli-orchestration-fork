@@ -32,6 +32,7 @@ import {
   handlePlanCommand,
   handleThemeCommand,
   handleYoloCommand,
+  showExperimentsPanel,
   showModelPicker,
   showPermissionPicker,
   showSettingsSelector,
@@ -41,6 +42,7 @@ import { handleLoopCommand } from './loop';
 import { handleProviderCommand } from './provider';
 import { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } from './info';
 import { handlePluginsCommand } from './plugins';
+import { handleReloadCommand, handleReloadTuiCommand } from './reload';
 import {
   handleExportDebugZipCommand,
   handleExportMdCommand,
@@ -68,6 +70,7 @@ export {
   handleThemeCommand,
   handleYoloCommand,
   showModelPicker,
+  showExperimentsPanel,
   showPermissionPicker,
   showSettingsSelector,
 } from './config';
@@ -78,6 +81,7 @@ export {
   showUsage,
 } from './info';
 export { handlePluginsCommand } from './plugins';
+export { handleReloadCommand, handleReloadTuiCommand } from './reload';
 export { handleGoalCommand } from './goal';
 export { handleLoopCommand } from './loop';
 export {
@@ -109,10 +113,12 @@ export interface SlashCommandHost {
   mountEditorReplacement(panel: Component & Focusable): void;
   restoreEditor(): void;
   restoreInputText(text: string): void;
+  refreshSlashCommandAutocomplete(): void;
 
   // Session
   requireSession(): Session;
   switchToSession(session: Session, message: string): Promise<void>;
+  reloadCurrentSessionView(session: Session, message: string): Promise<void>;
   beginSessionRequest(): void;
   failSessionRequest(message: string): void;
   sendQueuedMessage(session: Session, item: QueuedMessage): void;
@@ -169,6 +175,13 @@ async function executeSlashCommand(host: SlashCommandHost, input: string): Promi
     case 'blocked':
       host.track('input_command_invalid', { reason: 'blocked', command: intent.commandName });
       host.showError(slashBusyMessage(intent.commandName, intent.reason));
+      return;
+    case 'invalid':
+      host.track('input_command_invalid', {
+        reason: intent.reason,
+        command: intent.commandName,
+      });
+      host.showError(`Invalid slash command: /${intent.commandName}`);
       return;
     case 'skill': {
       const session = host.session;
@@ -236,6 +249,15 @@ async function handleBuiltInSlashCommand(
       return;
     case 'plugins':
       void handlePluginsCommand(host, args);
+      return;
+    case 'experiments':
+      await showExperimentsPanel(host);
+      return;
+    case 'reload':
+      await handleReloadCommand(host);
+      return;
+    case 'reload-tui':
+      await handleReloadTuiCommand(host);
       return;
     case 'editor':
       await handleEditorCommand(host, args);

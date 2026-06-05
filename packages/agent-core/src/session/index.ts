@@ -50,6 +50,7 @@ import {
 import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
 import { SessionSubagentHost } from './subagent-host';
 import type { ToolServices } from '../tools/support/services';
+import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
 
 export interface SessionOptions {
   readonly kaos: Kaos;
@@ -70,6 +71,7 @@ export interface SessionOptions {
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
   readonly appVersion?: string;
   readonly agentProfiles?: Record<string, ResolvedAgentProfile>;
+  readonly experimentalFlags?: ExperimentalFlagResolver;
 }
 
 export interface SessionSkillConfig {
@@ -132,6 +134,7 @@ export class Session {
   private readonly logHandle: SessionLogHandle | undefined;
   readonly hookEngine: HookEngine;
   readonly goals: SessionGoalStore;
+  readonly experimentalFlags: ExperimentalFlagResolver;
   private agentIdCounter = 0;
   private readonly skillsReady: Promise<void>;
   metadata: SessionMeta = {
@@ -168,6 +171,7 @@ export class Session {
     this.outcomeTracker = new SessionOutcomeTracker();
     this.learningEngine = new SessionLearningEngine(options.homedir, this.outcomeTracker);
     this.rpc = options.rpc;
+    this.experimentalFlags = options.experimentalFlags ?? new FlagResolver();
     this.hookEngine = new HookEngine(options.hooks, {
       cwd: options.kaos.getcwd(),
       sessionId: options.id,
@@ -258,6 +262,21 @@ export class Session {
       await this.stopBackgroundTasksOnExit();
       await this.flushMetadata();
       await this.triggerSessionEnd('exit');
+    } finally {
+      try {
+        await this.mcp.shutdown();
+      } finally {
+        await this.logHandle?.close();
+      }
+    }
+  }
+
+  async closeForReload(): Promise<void> {
+    try {
+      await Promise.allSettled(
+        Array.from(this.readyAgents(), async (agent) => agent.cron?.stop()),
+      );
+      await this.flushMetadata();
     } finally {
       try {
         await this.mcp.shutdown();
@@ -531,6 +550,7 @@ export class Session {
       onSubagentCompleted: (profileName, isError, options) => {
         this.outcomeTracker.recordSubagent(profileName, isError, options);
       },
+      experimentalFlags: this.experimentalFlags,
     });
   }
 

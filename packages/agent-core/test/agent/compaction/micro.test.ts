@@ -6,7 +6,7 @@ import {
   AGENT_WIRE_PROTOCOL_VERSION,
   InMemoryAgentRecordPersistence,
 } from '../../../src/agent/records';
-import { MASTER_ENV } from '../../../src/flags';
+import { FLAG_DEFINITIONS, MASTER_ENV } from '../../../src/flags';
 import { estimateTokensForMessages } from '../../../src/utils/tokens';
 import { recordingTelemetry, type TelemetryRecord } from '../../fixtures/telemetry';
 import { testAgent, type TestAgentContext } from '../harness/agent';
@@ -438,7 +438,7 @@ describe('MicroCompaction', () => {
     ]);
   });
 
-  it('tracks telemetry when a cache miss advances the micro-compaction cutoff', () => {
+  it('tracks telemetry when a cache miss advances the micro_compaction cutoff', () => {
     vi.useFakeTimers();
     const records: TelemetryRecord[] = [];
     const microCompaction = {
@@ -485,7 +485,8 @@ describe('MicroCompaction', () => {
     expect(records.filter((record) => record.event === 'micro_compaction_applied')).toHaveLength(1);
   });
 
-  it('applies micro-compaction by default (feature is stable)', async () => {
+  it('leaves context unchanged when the micro_compaction flag is disabled', async () => {
+    vi.stubEnv(MICRO_COMPACTION_FLAG_ENV, '0');
     vi.useFakeTimers();
     const persistence = new InMemoryAgentRecordPersistence();
     const ctx = testAgent({
@@ -511,7 +512,7 @@ describe('MicroCompaction', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'next' }] });
     await ctx.untilTurnEnd();
 
-    expect(lastMicroCompactionCutoff(persistence.records)).toBeDefined();
+    expect(lastMicroCompactionCutoff(persistence.records)).toBeUndefined();
   });
 
   it('uses the custom marker at the minContentTokens boundary', () => {
@@ -914,7 +915,11 @@ function hasMarker(messages: readonly Message[]): boolean {
 }
 
 function getMicroCompactionFlagEnv(): string {
-  return 'KIMI_CODE_EXPERIMENTAL_MICRO_COMPACTION';
+  const flag = FLAG_DEFINITIONS.find((definition) => definition.id === 'micro_compaction');
+  if (flag === undefined) {
+    throw new Error('Missing micro_compaction flag definition.');
+  }
+  return flag.env;
 }
 
 function singleTelemetryEvent(

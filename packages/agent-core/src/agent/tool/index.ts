@@ -5,7 +5,6 @@ import picomatch from 'picomatch';
 
 import type { Agent } from '..';
 import { makeErrorPayload } from '../../errors';
-import { flags } from '../../flags';
 import type { ExecutableTool } from '../../loop';
 import { createMcpAuthTool } from '../../mcp/auth-tool';
 import type { McpConnectionManager, McpServerEntry } from '../../mcp';
@@ -377,6 +376,8 @@ export class ToolManager {
       this.enabledTools.has('TaskList') &&
       this.enabledTools.has('TaskOutput') &&
       this.enabledTools.has('TaskStop');
+    const goalCommandEnabled =
+      this.agent.experimentalFlags.enabled('goal_command') && this.agent.type === 'main';
     this.builtinTools = new Map(
       [
         new b.ReadTool(kaos, workspace),
@@ -398,11 +399,11 @@ export class ToolManager {
         new b.ExitPlanModeTool(this.agent),
         new b.GetPlanStatusTool(this.agent.planTracker?.planFilePath ?? ''),
         new b.PlanTrackerTool(this.agent),
-        // Goal tools are main-agent-only.
-        this.agent.type === 'main' && new b.CreateGoalTool(this.agent),
-        this.agent.type === 'main' && new b.GetGoalTool(this.agent),
-        this.agent.type === 'main' && new b.SetGoalBudgetTool(this.agent),
-        this.agent.type === 'main' && new b.UpdateGoalTool(this.agent),
+        // Goal tools are main-agent-only and gated by the goal_command flag.
+        goalCommandEnabled && new b.CreateGoalTool(this.agent),
+        goalCommandEnabled && new b.GetGoalTool(this.agent),
+        goalCommandEnabled && new b.SetGoalBudgetTool(this.agent),
+        goalCommandEnabled && new b.UpdateGoalTool(this.agent),
         this.agent.rpc?.requestQuestion && new b.AskUserQuestionTool(this.agent),
         new b.TodoListTool(this.toolStore),
         new b.TaskListTool(background),
