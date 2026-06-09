@@ -66,6 +66,7 @@ Take a look at this project and explain its main directories.
 - **Rich plugin ecosystem.** Install skills, MCP servers, and data sources from the marketplace or any GitHub repo, with each install's trust level surfaced up front.
 - **Subagents for focused, parallel work.** Dispatch built-in `coder`, `explore`, and `plan` subagents in isolated contexts while keeping the main conversation clean.
 - **Lifecycle hooks.** Run local commands at key points to gate risky tool calls, audit decisions, trigger desktop notifications, or connect to your own automation.
+- **Event-driven orchestration.** Automatically inject relevant skills based on session events — subagent completions, task status, health alerts, cron fires, and more. Configure mappings in `config.toml`.
 - **Editor & IDE integration (ACP).** Drive a Kimi Code CLI session straight from Zed, JetBrains, or any [Agent Client Protocol](https://agentclientprotocol.com/) client with `kimi acp`.
 
 ## Use it in your editor (ACP)
@@ -88,6 +89,42 @@ For Zed, add this to `~/.config/zed/settings.json`:
 ```
 
 Then open a new conversation in Zed's Agent panel. See [Using in IDEs](https://moonshotai.github.io/kimi-code/en/guides/ides) for JetBrains setup and troubleshooting, and the [`kimi acp` reference](https://moonshotai.github.io/kimi-code/en/reference/kimi-acp) for the full capability matrix.
+
+## Orchestration
+
+Kimi Code CLI can automatically inject skills into the conversation based on session events. This lets the agent adapt its behavior without manual intervention — for example, triggering a `code-review` skill when a subagent finishes with a diff, or a `troubleshooting` skill when health degrades.
+
+Configure mappings in `~/.kimi-code/config.toml` or your project's `.kimi-code/config.toml`:
+
+```toml
+[orchestration]
+enabled = true
+max_queue_size = 50
+max_injection_size = 4000
+cooldown_ms = 300000
+max_skill_repetition = 3
+
+[[orchestration.mappings]]
+event = "subagent.completed"
+skill = "code-review"
+condition = "hasDiff"
+priority = 3
+
+[[orchestration.mappings]]
+event = "task.completed"
+skill = "quality-gate"
+condition = "isCodeTask"
+priority = 2
+
+[[orchestration.mappings]]
+event = "health.degraded"
+skill = "troubleshooting"
+priority = 0
+```
+
+Supported events: `task.completed`, `task.failed`, `task.created`, `task.unblocked`, `subagent.completed`, `subagent.failed`, `subagent.started`, `goal.started`, `goal.completed`, `goal.blocked`, `goal.paused`, `health.degraded`, `cron.fired`, `hook.fired`, `mcp.failed`.
+
+Built-in conditions: `hasDiff`, `isCodeTask`, `testFailure`, `runtimeError`, `goalActive`, `taskCountGt2`.
 
 ## Docs
 
