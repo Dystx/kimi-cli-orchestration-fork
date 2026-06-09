@@ -1,104 +1,25 @@
-# Kimi Code CLI
+# Kimi CLI Orchestration Fork
 
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Docs](https://img.shields.io/badge/docs-online-blue)](https://moonshotai.github.io/kimi-code/zh/)
+> **Kimi Code CLI 的事件驱动编排层。** 这个 Fork 添加了自动技能注入、自适应提示和可配置的事件-技能映射 —— 让 Agent 根据会话中发生的事件自动调整行为。
 
-[Documentation](https://moonshotai.github.io/kimi-code/zh/) · [Issues](https://github.com/MoonshotAI/kimi-code/issues) · [English](README.md)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Tests](https://img.shields.io/badge/tests-2617%20passed-brightgreen)]() [![上游](https://img.shields.io/badge/上游-MoonshotAI%2Fkimi--code-blue)](https://github.com/MoonshotAI/kimi-code)
 
+[文档](https://moonshotai.github.io/kimi-code/zh/) · [Issues](https://github.com/MoonshotAI/kimi-code/issues) · [English](README.md)
 
-![Kimi Code 的使用演示](./docs/media/intro.gif)
+---
 
+## 这个 Fork 添加了什么
 
-## 什么是 Kimi Code CLI
+上游的 [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) 是一个运行在终端中的 AI 编程助手。**这个 Fork 添加了一个编排系统**，它会监视会话事件并自动将相关技能注入对话 —— 无需手动提示。
 
-Kimi Code CLI 是一个运行在终端里的 AI 编程 agent，可以帮你读写代码、执行 shell 命令、检索文件、抓取网页，并根据反馈自主决定下一步动作。开箱即用对接 Moonshot AI 的 Kimi 模型，也可指向其他兼容厂商。
+### 工作原理
 
-## 安装
+当子 Agent 完成并带有代码差异时 → 注入 `code-review`。  
+当任务完成时 → 注入 `quality-gate`。  
+当健康状态下降时 → 注入 `troubleshooting`。  
+当定时任务触发时 → 注入 `plan-first`。
 
-推荐使用官方安装脚本，不需要提前安装 Node.js。
-
-- **macOS / Linux**：
-
-```sh
-curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
-```
-
-- **Homebrew（macOS / Linux）**：
-
-```sh
-brew install kimi-code
-```
-
-- **Windows（PowerShell）**：
-
-```powershell
-irm https://code.kimi.com/kimi-code/install.ps1 | iex
-```
-
-> Windows 用户首次启动前还需要安装 [Git for Windows](https://gitforwindows.org/)，Kimi Code CLI 会使用其中的 Git Bash 作为 Shell 环境。如果 Git Bash 安装在非标准路径，请把 `KIMI_SHELL_PATH` 设为 `bash.exe` 的绝对路径。
-
-随后在新的终端会话中运行：
-
-```sh
-kimi --version
-```
-
-npm 安装、升级、卸载方式，见[快速上手](https://moonshotai.github.io/kimi-code/zh/guides/getting-started)。
-
-## 快速开始
-
-进入项目目录并启动交互界面：
-
-```sh
-cd your-project
-kimi
-```
-
-首次启动时，在 Kimi Code CLI 里输入 `/login`，选择 Kimi Code OAuth 或 Moonshot AI Open Platform API 密钥登录。登录完成后，可以先让它熟悉项目：
-
-```
-帮我看一下这个项目的目录结构，简单介绍一下每个目录是做什么的
-```
-
-## 核心特性
-
-- **二进制发行，零环境依赖** 一行命令安装，不需要预装 Node.js，不用折腾 PATH，也不会和全局模块冲突。
-- **极速启动** TUI 在毫秒级就绪，开一个新会话没有任何心智负担。
-- **精致的 TUI 体验** 端到端打磨的交互界面，专为长时间、专注的 Agent 会话优化。
-- **视频也能输入** 把屏幕录像、演示视频拖进对话，让 Agent 看那些难以用文字描述的东西——把参考片段做成 LUT、把长视频剪成短视频、把录屏变成代码，等等。
-- **AI-native 的 MCP 配置** 通过 `/mcp-config` 对话式添加、编辑、认证 MCP 服务器，无需手写 JSON。
-- **丰富的插件生态** 从插件市场或任意 GitHub 仓库安装 skills、MCP 服务器和数据源，每次安装都会标明来源的信任级别。
-- **子 Agent 聚焦并行工作** 内置 `coder`、`explore`、`plan` 子 Agent 在隔离上下文中处理子任务，主对话保持清爽。
-- **生命周期 hooks** 在关键节点执行本地命令：拦截高风险工具调用、审计决策、发送桌面通知，或对接你自己的自动化脚本。
-- **事件驱动编排** 根据会话事件自动注入相关技能——子 Agent 完成、任务状态、健康告警、定时触发等。在 `config.toml` 中配置映射规则。
-- **编辑器 / IDE 集成（ACP）** 用 `kimi acp` 让 Zed、JetBrains 等任意 [Agent Client Protocol](https://agentclientprotocol.com/) 客户端直接驱动会话。
-
-
-## 在编辑器里使用（ACP）
-
-Kimi Code CLI 支持 [Agent Client Protocol](https://agentclientprotocol.com/)，ACP 兼容的编辑器 / IDE（Zed、JetBrains……）可以通过 stdio 直接驱动会话。登录一次后，把编辑器指向 `kimi acp` 子命令即可，无需重复登录。
-
-以 Zed 为例，在 `~/.config/zed/settings.json` 中加入：
-
-```json
-{
-  "agent_servers": {
-    "Kimi Code CLI": {
-      "type": "custom",
-      "command": "kimi",
-      "args": ["acp"],
-      "env": {}
-    }
-  }
-}
-```
-
-随后在 Zed 的 Agent 面板新建对话即可。JetBrains 配置与排障见[在 IDE 中使用](https://moonshotai.github.io/kimi-code/zh/guides/ides)，完整能力矩阵见 [`kimi acp` 参考](https://moonshotai.github.io/kimi-code/zh/reference/kimi-acp)。
-
-## 事件驱动编排
-
-Kimi Code CLI 可以根据会话事件自动注入技能，让 Agent 在无需手动干预的情况下自适应调整行为。例如，当子 Agent 完成并带有代码差异时自动触发 `code-review` 技能，或在健康状态下降时触发 `troubleshooting` 技能。
-
-在 `~/.kimi-code/config.toml` 或项目级的 `.kimi-code/config.toml` 中配置映射规则：
+全部通过 `config.toml` 配置。
 
 ```toml
 [orchestration]
@@ -126,48 +47,171 @@ skill = "troubleshooting"
 priority = 0
 ```
 
-支持的事件：`task.completed`、`task.failed`、`task.created`、`task.unblocked`、`subagent.completed`、`subagent.failed`、`subagent.started`、`goal.started`、`goal.completed`、`goal.blocked`、`goal.paused`、`health.degraded`、`cron.fired`、`hook.fired`、`mcp.failed`。
+### 特性
 
-内置条件：`hasDiff`、`isCodeTask`、`testFailure`、`runtimeError`、`goalActive`、`taskCountGt2`。
+- **15 种事件类型** — `task.*`、`subagent.*`、`goal.*`、`health.degraded`、`cron.fired`、`hook.fired`、`mcp.failed`
+- **6 种内置条件** — `hasDiff`、`isCodeTask`、`testFailure`、`runtimeError`、`goalActive`、`taskCountGt2`
+- **优先级队列** — 数字越小优先级越高，相同优先级按 FIFO 处理
+- **速率限制** — 按事件类型冷却，防止刷屏
+- **去重** — 滚动窗口内相同事件会被抑制
+- **重复抑制** — 技能在连续触发 `max_skill_repetition` 次后停止注入
+- **效果追踪** — 记录每个技能的回合结果，学习哪些映射有效
+- **自适应目标续行** — 将近期事件摘要附加到目标续行提示中
+- **持久化** — 队列和历史通过 `orchestration.json` 在会话重启后恢复
+- **记忆集成** — 效果洞察持久化到记忆存储，支持跨会话回忆
 
-## 文档
+---
 
-- [快速上手](https://moonshotai.github.io/kimi-code/zh/guides/getting-started)
-- [交互与审批](https://moonshotai.github.io/kimi-code/zh/guides/interaction)
-- [会话](https://moonshotai.github.io/kimi-code/zh/guides/sessions)
-- [在 IDE 中使用（ACP）](https://moonshotai.github.io/kimi-code/zh/guides/ides)
-- [配置](https://moonshotai.github.io/kimi-code/zh/configuration/config-files)
-- [命令参考](https://moonshotai.github.io/kimi-code/zh/reference/kimi-command)
+## 安装
 
-## 本地开发
+与上游相同。无需 Node.js。
 
-环境要求：Node.js ≥ 24.15.0，pnpm 10.33.0。
+- **macOS 或 Linux**：
 
 ```sh
-git clone https://github.com/MoonshotAI/kimi-code.git
-cd kimi-code
+curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
+```
+
+- **Homebrew (macOS/Linux)**：
+
+```sh
+brew install kimi-code
+```
+
+- **Windows (PowerShell)**：
+
+```powershell
+irm https://code.kimi.com/kimi-code/install.ps1 | iex
+```
+
+然后运行：
+
+```sh
+kimi --version
+```
+
+## 快速开始
+
+```sh
+cd your-project
+kimi
+```
+
+首次启动时，在 Kimi Code CLI 中输入 `/login`，选择 Kimi Code OAuth 或 Moonshot AI Open Platform API 密钥登录。
+
+## 配置编排
+
+添加到 `~/.kimi-code/config.toml`（全局）或 `.kimi-code/config.toml`（项目级）：
+
+```toml
+[orchestration]
+enabled = true
+max_queue_size = 50
+max_injection_size = 4000
+cooldown_ms = 300000
+max_skill_repetition = 3
+
+[[orchestration.mappings]]
+event = "subagent.completed"
+skill = "code-review"
+condition = "hasDiff"
+priority = 3
+
+[[orchestration.mappings]]
+event = "task.completed"
+skill = "quality-gate"
+condition = "isCodeTask"
+priority = 2
+
+[[orchestration.mappings]]
+event = "goal.started"
+skill = "plan-first"
+condition = "taskCountGt2"
+priority = 1
+
+[[orchestration.mappings]]
+event = "health.degraded"
+skill = "troubleshooting"
+priority = 0
+
+[[orchestration.mappings]]
+event = "subagent.completed"
+skill = "evidence-contract"
+condition = "hasDiff"
+priority = 3
+
+[[orchestration.mappings]]
+event = "goal.blocked"
+skill = "test-debug-loop"
+condition = "testFailure"
+priority = 0
+
+[[orchestration.mappings]]
+event = "goal.paused"
+skill = "troubleshooting"
+condition = "runtimeError"
+priority = 0
+
+[[orchestration.mappings]]
+event = "task.created"
+skill = "plan-first"
+condition = "taskCountGt2"
+priority = 1
+```
+
+**事件：** `task.completed`、`task.failed`、`task.created`、`task.unblocked`、`subagent.completed`、`subagent.failed`、`subagent.started`、`goal.started`、`goal.completed`、`goal.blocked`、`goal.paused`、`health.degraded`、`cron.fired`、`hook.fired`、`mcp.failed`。
+
+**条件：** `hasDiff`、`isCodeTask`、`testFailure`、`runtimeError`、`goalActive`、`taskCountGt2`。
+
+## 上游功能
+
+此 Fork 包含所有上游 Kimi Code CLI 功能：
+
+- 二进制发行，零环境依赖
+- 极速 TUI 启动
+- 视频输入
+- AI-native MCP 配置
+- 丰富的插件生态
+- 子 Agent 聚焦并行工作
+- 生命周期 hooks
+- 编辑器 / IDE 集成（ACP）
+
+详情见[上游文档](https://moonshotai.github.io/kimi-code/zh/)。
+
+## 开发
+
+要求：Node.js ≥ 24.15.0，pnpm 10.33.0。
+
+```sh
+git clone https://github.com/Dystx/kimi-cli-orchestration-fork.git
+cd kimi-cli-orchestration-fork
 pnpm install
 ```
 
 ```sh
-pnpm dev:cli    # 以开发模式运行 CLI
+pnpm dev:cli    # 开发模式运行 CLI
 pnpm test       # 运行测试
 pnpm typecheck  # TypeScript 检查
-pnpm lint       # 运行 oxlint
+pnpm lint       # oxlint
 pnpm build      # 构建所有包
 ```
 
-完整贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+### 测试覆盖
+
+- **2,617 个测试通过**，覆盖 181 个测试文件
+- **20 个编排专属集成测试**，覆盖所有事件类型、持久化、速率限制、去重、技能注入和记忆集成
+
+## 文档
+
+- [快速上手](https://moonshotai.github.io/kimi-code/zh/guides/getting-started)
+- [配置](https://moonshotai.github.io/kimi-code/zh/configuration/config-files)
+- [命令参考](https://moonshotai.github.io/kimi-code/zh/reference/kimi-command)
 
 ## 社区
 
-- [Issues](https://github.com/MoonshotAI/kimi-code/issues)
-- 安全漏洞反馈，请见 [SECURITY.md](SECURITY.md)。
+- [上游 Issues](https://github.com/MoonshotAI/kimi-code/issues)
+- 安全漏洞见 [SECURITY.md](SECURITY.md)。
 
-## 致谢
+## 许可
 
-我们的 TUI 构建在 [`pi-tui`](https://github.com/earendil-works/pi-mono/tree/main/packages/tui) 之上。我们衷心感谢 `pi-tui` 作者的工作。
-
-## 许可证
-
-基于 [MIT](LICENSE) 协议发布。
+基于 [MIT 许可证](LICENSE) 发布。
