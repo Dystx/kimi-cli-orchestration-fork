@@ -40,6 +40,14 @@ export class HookEngine {
     return id;
   }
 
+  /** Register a system hook — does not emit orchestration events. */
+  registerSystem(hook: HookDef): string {
+    const id = `sys_${++this.hookIdCounter}`;
+    this.hookIds.set(id, { ...hook, system: true });
+    this.addHookInternal({ ...hook, system: true });
+    return id;
+  }
+
   remove(id: string): boolean {
     const hook = this.hookIds.get(id);
     if (hook === undefined) return false;
@@ -126,6 +134,21 @@ export class HookEngine {
     );
     const { action, reason } = aggregateResults(event, results);
     this.emitResolved(event, matcherValue, action, reason, Date.now() - startedAt);
+    // Only emit orchestration events for user-registered hooks
+    const hasUserHook = matched.some((h) => !h.system);
+    if (hasUserHook) {
+      this.options.onOrchestrationEvent?.({
+        type: 'hook.fired',
+        payload: {
+          event,
+          matcher: matcherValue,
+          hookCount: matched.length,
+          action,
+          reason,
+          durationMs: Date.now() - startedAt,
+        },
+      });
+    }
     return results;
   }
 

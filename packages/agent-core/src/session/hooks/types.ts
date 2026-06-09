@@ -1,4 +1,5 @@
 import type { ContentPart } from '@moonshot-ai/kosong';
+import type { OrchestrationEvent } from '../orchestration-hooks';
 
 export const HOOK_EVENT_TYPES = [
   'PreToolUse',
@@ -25,6 +26,8 @@ export interface HookDef {
   readonly matcher?: string;
   readonly command: string;
   readonly timeout?: number;
+  /** Whether this hook was registered by the system (true) or user (false/default). */
+  readonly system?: boolean;
 }
 
 export interface HookResult {
@@ -66,4 +69,5 @@ export interface HookEngineOptions {
   readonly sessionId?: string;
   readonly onTriggered?: HookTriggeredCallback;
   readonly onResolved?: HookResolvedCallback;
+  readonly onOrchestrationEvent?: (event: OrchestrationEvent) => void;
 }

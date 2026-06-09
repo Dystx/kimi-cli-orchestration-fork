@@ -68,12 +68,22 @@ tools:
 
 subagents:
   coder:
-    description: Good at general software engineering tasks.
+    description: Senior software engineer for implementation, bug fixes, refactoring, and test writing. Uses TDD, small diffs, and verification. Model kimi-k2.6.
   explore:
-    description: Fast codebase exploration with prompt-enforced read-only behavior.
+    description: Fast codebase exploration specialist — read-only search, analysis, and architecture mapping. Model kimi-k2.6. Use for >3 search queries.
   plan:
-    description: Read-only implementation planning and architecture design.
+    description: Technical planner and architect — creates implementation plans with trade-offs, risks, and phases before any code is written. Model kimi-k2.6, extended thinking.
   reviewer:
-    description: Code review specialist for quality assurance and defect detection.
+    description: Senior code reviewer — security, performance, type safety, test coverage, and maintainability analysis. Read-only. Model kimi-k2.6.
   architect:
-    description: System design and refactoring planning with implementation roadmaps.
+    description: Staff software architect — system design, API contracts, migration paths, and technology evaluation. Model kimi-k2.6, extended thinking.
+  security:
+    description: Application security engineer — OWASP Top 10 2025, ASVS 5.0, injection detection, crypto review, secret scanning. Read-only. Model kimi-k2.6, extended thinking.
+  debug:
+    description: Debugging specialist — hypothesis-driven root cause analysis, stack traces, log analysis, data flow tracing. Read-only. Model kimi-k2.6.
+  test:
+    description: Senior test engineer — unit/integration/e2e tests, TDD, property-based testing, flaky test diagnosis, coverage analysis. Model kimi-k2.6.
+  docs:
+    description: Technical writer — API docs, READMEs, ADRs, changelogs, inline comments, user guides. Model kimi-k2.6.
+  performance:
+    description: Performance engineer — bottleneck identification, algorithmic analysis, profiling, caching strategy, bundle optimization. Read-only. Model kimi-k2.6, extended thinking.

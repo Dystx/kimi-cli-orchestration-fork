@@ -390,6 +390,15 @@ export class GoalMode {
       completionCriterion: state.completionCriterion,
     });
     this.trackGoalCreated(actor, input.replace === true);
+    this.agent.taskRegistry?.setGoalActive(true);
+    this.agent.orchestrationHooks?.emit({
+      type: 'goal.started',
+      payload: {
+        goalId: state.goalId,
+        objective: state.objective,
+        taskCount: this.agent.taskRegistry?.snapshot().total ?? 0,
+      },
+    });
     return this.toSnapshot(state);
   }
 
@@ -410,6 +419,17 @@ export class GoalMode {
       change: { kind: 'lifecycle', status: 'paused', reason: input.reason, actor },
     });
     this.appendStatusUpdate(state, actor, input.reason);
+    this.agent.taskRegistry?.setGoalActive(false);
+    this.agent.orchestrationHooks?.emit({
+      type: 'goal.paused',
+      payload: {
+        goalId: state.goalId,
+        reason: input.reason,
+        actor,
+        turnsUsed: state.turnsUsed,
+        tokensUsed: state.tokensUsed,
+      },
+    });
     return this.toSnapshot(state);
   }
 
@@ -430,6 +450,17 @@ export class GoalMode {
       change: { kind: 'lifecycle', status: 'paused', reason: input.reason, actor },
     });
     this.appendStatusUpdate(state, actor, input.reason);
+    this.agent.taskRegistry?.setGoalActive(false);
+    this.agent.orchestrationHooks?.emit({
+      type: 'goal.paused',
+      payload: {
+        goalId: state.goalId,
+        reason: input.reason,
+        actor,
+        turnsUsed: state.turnsUsed,
+        tokensUsed: state.tokensUsed,
+      },
+    });
     return this.toSnapshot(state);
   }
 
@@ -512,6 +543,20 @@ export class GoalMode {
       change: { kind: 'lifecycle', status: 'blocked', reason: input.reason, actor },
     });
     this.appendStatusUpdate(state, actor, input.reason);
+    this.agent.taskRegistry?.setGoalActive(false);
+    this.agent.orchestrationHooks?.emit({
+      type: 'goal.blocked',
+      payload: {
+        goalId: state.goalId,
+        reason: input.reason,
+        turnsUsed: state.turnsUsed,
+        tokensUsed: state.tokensUsed,
+        budget: {
+          tokenBudgetReached: state.budgetLimits.tokenBudget !== undefined && state.tokensUsed >= state.budgetLimits.tokenBudget,
+          turnBudgetReached: state.budgetLimits.turnBudget !== undefined && state.turnsUsed >= state.budgetLimits.turnBudget,
+        },
+      },
+    });
     return this.toSnapshot(state);
   }
 
@@ -539,6 +584,18 @@ export class GoalMode {
       reason: input.reason,
       stats: this.statsOf(state),
       actor,
+    });
+    this.agent.taskRegistry?.setGoalActive(false);
+    this.agent.orchestrationHooks?.resetSkillRepetition();
+    this.agent.orchestrationHooks?.emit({
+      type: 'goal.completed',
+      payload: {
+        goalId: state.goalId,
+        reason: input.reason,
+        turnsUsed: state.turnsUsed,
+        tokensUsed: state.tokensUsed,
+        wallClockMs: liveWallClockMs(state, Date.now()),
+      },
     });
     // ...then clear the durable record (emits onGoalUpdated(null) → box clears).
     this.clearInternal(actor);

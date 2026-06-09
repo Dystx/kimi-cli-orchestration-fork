@@ -302,6 +302,14 @@ export class FullCompaction {
       }
 
       const newHistory = this.agent.context.history;
+      if (newHistory.length !== originalHistory.length) {
+        // History was appended to during compaction (e.g. tool results arrived
+        // while compaction was running asynchronously). The compactedCount was
+        // computed against the old history, so applying it now could orphan
+        // tool results whose matching assistant is in the compacted prefix.
+        this.cancel();
+        return undefined;
+      }
       for (let i = 0; i < originalHistory.length; i++) {
         if (newHistory[i] !== originalHistory[i]) {
           // History changed during compaction, likely due to undo

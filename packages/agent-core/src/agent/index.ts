@@ -94,7 +94,7 @@ export interface AgentOptions {
   readonly telemetry?: TelemetryClient | undefined;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
   readonly appVersion?: string;
-  /** OMK fork-specific session managers and lifecycle callbacks. */
+  /** Fork-specific session managers and lifecycle callbacks. */
   readonly orchestration?: OrchestrationContext;
   readonly onUsageRecorded?: UsageRecordCallback | undefined;
   readonly experimentalFlags?: ExperimentalFlagResolver;
@@ -125,7 +125,7 @@ export class Agent {
   readonly onUsageRecorded?: UsageRecordCallback | undefined;
   readonly experimentalFlags: ExperimentalFlagResolver;
 
-  // OMK orchestration subsystems (populated from orchestration context).
+  // Orchestration subsystems (populated from orchestration context).
   readonly messageBus?: SessionMessageBus;
   readonly sharedStore?: SessionSharedStore;
   readonly costTracker?: SessionCostTracker;
@@ -134,6 +134,7 @@ export class Agent {
   readonly outcomeTracker?: import('../session/outcome-tracker').SessionOutcomeTracker;
   readonly learningEngine?: import('../session/learning-engine').SessionLearningEngine;
   readonly memoryStore?: import('../session/memory-store').MemoryStore;
+  readonly orchestrationHooks?: import('../session/orchestration-hooks').OrchestrationHooks;
   readonly taskRegistry?: import('../session/task-registry').SessionTaskRegistry;
   readonly fileLock?: import('../session/file-lock').SessionFileLock;
   readonly onTurnEnded?:
@@ -202,6 +203,7 @@ export class Agent {
     this.outcomeTracker = orch?.outcomeTracker;
     this.learningEngine = orch?.learningEngine;
     this.memoryStore = orch?.memoryStore;
+    this.orchestrationHooks = orch?.orchestrationHooks;
     this.taskRegistry = orch?.taskRegistry;
     this.fileLock = orch?.fileLock;
     this.onTurnEnded = orch?.onTurnEnded;

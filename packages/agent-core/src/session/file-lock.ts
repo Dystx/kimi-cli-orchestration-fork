@@ -80,14 +80,14 @@ export class SessionFileLock {
   }
 
   async save(homedir: string): Promise<void> {
-    const path = join(homedir, '.omk', 'state', 'file-locks.json');
+    const path = join(homedir, 'state', 'file-locks.json');
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify({ locks: Array.from(this.locks.values()) }), 'utf-8');
   }
 
   async load(homedir: string): Promise<void> {
     try {
-      const path = join(homedir, '.omk', 'state', 'file-locks.json');
+      const path = join(homedir, 'state', 'file-locks.json');
       const text = await readFile(path, 'utf-8');
       const data = JSON.parse(text) as { locks?: FileLock[] };
       if (Array.isArray(data.locks)) {

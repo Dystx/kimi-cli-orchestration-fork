@@ -14,7 +14,7 @@ export async function loadAgentProfilesFromDir(
   const resolved = resolvePathBasedExtends(loaded);
   const rawProfiles = resolved.map((r) => r.profile);
 
-  // Merge with fallback profiles so OMK-style references to built-ins
+  // Merge with fallback profiles so extended-style references to built-ins
   // (e.g. extending "default" or "agent") resolve correctly.
   if (fallbackProfiles !== undefined) {
     const fallbackRaw: RawAgentProfile[] = [];
@@ -84,7 +84,7 @@ async function finalizeRawAgentProfile(
   profilePath: string,
 ): Promise<RawAgentProfile> {
   let raw = parseAgentProfileYaml(content, profilePath);
-  raw = await resolveOmkSubagentPaths(raw, profilePath);
+  raw = await resolveSubagentPaths(raw, profilePath);
   if (raw.systemPromptPath === undefined) return raw;
   const templatePath = join(dirname(profilePath), raw.systemPromptPath);
   try {
@@ -122,7 +122,7 @@ function parseAgentProfileYaml(content: string, profilePath: string): RawAgentPr
       { cause: error },
     );
   }
-  parsed = normalizeOmkProfile(parsed);
+  parsed = normalizeExtendedProfile(parsed);
   const result = RawAgentProfileSchema.safeParse(parsed);
   if (!result.success) {
     throw new Error(`Invalid agent profile at ${profilePath}`);
@@ -131,20 +131,20 @@ function parseAgentProfileYaml(content: string, profilePath: string): RawAgentPr
 }
 
 /**
- * Detect and normalize oh-my-kimi (OMK) agent profile format to the
- * kimi-code native schema. OMK profiles nest everything under an `agent:`
+ * Detect and normalize extended agent profile format to the
+ * kimi-code native schema. Extended profiles nest everything under an `agent:`
  * key and use snake_case names. This function is a no-op for native
  * kimi-code profiles.
  *
- * Subagent `path` references are kept as `_omkPath` on the entry so
- * `resolveOmkSubagentPaths` can fix up the keys asynchronously later.
+ * Subagent `path` references are kept as `_subagentPath` on the entry so
+ * `resolveSubagentPaths` can fix up the keys asynchronously later.
  */
-function normalizeOmkProfile(parsed: unknown): unknown {
+function normalizeExtendedProfile(parsed: unknown): unknown {
   if (!isRecord(parsed)) return parsed;
   const agent = parsed['agent'];
   if (!isRecord(agent)) return parsed;
 
-  // Detect OMK format: must have `agent` key with profile data inside.
+  // Detect extended format: must have `agent` key with profile data inside.
   const normalized: Record<string, unknown> = {};
 
   if (agent['extend'] !== undefined) {
@@ -182,7 +182,7 @@ function normalizeOmkProfile(parsed: unknown): unknown {
       }
       // Preserve the path for async resolution later.
       if (typeof value['path'] === 'string') {
-        entry['_omkPath'] = value['path'];
+        entry['_subagentPath'] = value['path'];
       }
       subagents[key] = entry;
     }
@@ -195,11 +195,11 @@ function normalizeOmkProfile(parsed: unknown): unknown {
 }
 
 /**
- * For file-based profiles, resolve OMK subagent `_omkPath` references to
+ * For file-based profiles, resolve subagent `_subagentPath` references to
  * actual profile names by reading the referenced files. This mutates the
  * profile's subagent keys in place.
  */
-async function resolveOmkSubagentPaths(
+async function resolveSubagentPaths(
   profile: RawAgentProfile,
   profilePath: string,
 ): Promise<RawAgentProfile> {
@@ -207,7 +207,7 @@ async function resolveOmkSubagentPaths(
 
   const fixedSubagents: Record<string, { description?: string }> = {};
   for (const [key, entry] of Object.entries(profile.subagents)) {
-    const pathRef = (entry as Record<string, unknown>)['_omkPath'];
+    const pathRef = (entry as Record<string, unknown>)['_subagentPath'];
     let targetKey = key;
 
     if (typeof pathRef === 'string') {
@@ -233,10 +233,10 @@ async function resolveOmkSubagentPaths(
 }
 
 /**
- * OMK profiles reference other profiles by file path in `extend`.
+ * Extended profiles reference other profiles by file path in `extend`.
  * kimi-code uses profile *names* in `extends`. This function resolves
  * path-based extends by looking up the target file's profile name.
- * It also maps OMK's built-in "default" to kimi-code's "agent".
+ * It also maps extended built-in "default" to kimi-code's "agent".
  */
 function resolvePathBasedExtends(loaded: readonly LoadedRawProfile[]): LoadedRawProfile[] {
   // Build a map of absolute file path -> profile name.
@@ -249,7 +249,7 @@ function resolvePathBasedExtends(loaded: readonly LoadedRawProfile[]): LoadedRaw
   for (const { path, profile } of loaded) {
     let extendsValue = profile.extends;
     if (extendsValue !== undefined) {
-      // Map OMK built-in "default" to kimi-code's main default profile.
+      // Map extended built-in "default" to kimi-code's main default profile.
       if (extendsValue === 'default') {
         extendsValue = 'agent';
       } else if (looksLikeFilePath(extendsValue)) {

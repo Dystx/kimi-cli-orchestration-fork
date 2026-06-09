@@ -148,9 +148,17 @@ export class SessionSubagentHost {
       this.emitSubagentSpawned(parent, id, profile.name, runOptions);
       try {
         await this.configureChild(parent, agent, profile, worktreePath);
+        this.session.orchestrationHooks?.emit({
+          type: 'subagent.started',
+          payload: {
+            subagentId: id,
+            profileName: profile.name,
+            worktree: worktreePath !== undefined,
+          },
+        });
         return await this.runPromptTurn(parent, id, agent, profile.name, runOptions);
       } catch (error) {
-        this.emitSubagentFailed(parent, id, runOptions, error);
+        this.emitSubagentFailed(parent, id, profile.name, runOptions, error);
         throw error;
       }
     }).finally(() => {
@@ -192,7 +200,7 @@ export class SessionSubagentHost {
         }
         return await this.runPromptTurn(parent, agentId, child, profileName, runOptions);
       } catch (error) {
-        this.emitSubagentFailed(parent, agentId, runOptions, error);
+        this.emitSubagentFailed(parent, agentId, profileName, runOptions, error);
         throw error;
       }
     });
@@ -214,7 +222,7 @@ export class SessionSubagentHost {
         this.observeFirstRequest(child, runOptions);
         return await this.waitForChildCompletion(parent, agentId, child, profileName, runOptions);
       } catch (error) {
-        this.emitSubagentFailed(parent, agentId, runOptions, error);
+        this.emitSubagentFailed(parent, agentId, profileName, runOptions, error);
         throw error;
       }
     });
@@ -417,6 +425,7 @@ export class SessionSubagentHost {
     const changes = beforeStatus !== undefined
       ? await computeGitDiff(child.kaos, child.config.cwd, beforeStatus)
       : undefined;
+    const hasMeaningfulDiff = changes !== undefined && changes.split('\n').some((line) => line.startsWith('+') || line.startsWith('-'));
 
     if (startTime !== undefined) {
       this.subagentStatuses.set(childId, {
@@ -435,6 +444,23 @@ export class SessionSubagentHost {
       usage,
       contextTokens: child.context.tokenCount,
     });
+    this.session.orchestrationHooks?.emit({
+      type: 'subagent.completed',
+      payload: {
+        subagentId: childId,
+        profileName,
+        hasDiff: hasMeaningfulDiff,
+        resultSummary: result,
+        durationMs: startTime !== undefined ? Date.now() - startTime : undefined,
+        tokenUsage: usage
+          ? {
+              input: usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation,
+              output: usage.output,
+            }
+          : undefined,
+        contextTokens: child.context.tokenCount,
+      },
+    });
     this.triggerSubagentStop(parent, profileName, result);
     if (startTime !== undefined) {
       parent.onSubagentCompleted?.(profileName, false, {
@@ -452,11 +478,12 @@ export class SessionSubagentHost {
     profile: ResolvedAgentProfile,
     worktreePath?: string,
   ): Promise<void> {
-    // A subagent always inherits the parent agent's model.
+    // A subagent inherits the parent agent's model by default, but the profile
+    // can override modelAlias and thinkingLevel to enable architect/editor split.
     child.config.update({
       cwd: worktreePath ?? parent.config.cwd,
-      modelAlias: parent.config.modelAlias,
-      thinkingLevel: parent.config.thinkingLevel,
+      modelAlias: profile.modelAlias ?? parent.config.modelAlias,
+      thinkingLevel: profile.thinkingLevel ?? parent.config.thinkingLevel,
     });
 
     const context = await prepareSystemPromptContext(
@@ -559,14 +586,24 @@ export class SessionSubagentHost {
   private emitSubagentFailed(
     parent: Agent,
     childId: string,
+    profileName: string,
     options: RunSubagentOptions,
     error: unknown,
   ): void {
     if (shouldSuppressQueuedAttemptFailureEvent(options, error)) return;
+    const errorMessage = error instanceof Error ? error.message : String(error);
     parent.emitEvent({
       type: 'subagent.failed',
       subagentId: childId,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
+    });
+    this.session.orchestrationHooks?.emit({
+      type: 'subagent.failed',
+      payload: {
+        subagentId: childId,
+        profileName,
+        error: errorMessage,
+      },
     });
   }
 }

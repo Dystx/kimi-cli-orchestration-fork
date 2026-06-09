@@ -12,6 +12,7 @@
 
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'pathe';
+import type { MemoryStore } from './memory-store';
 import type { SessionOutcomeTracker, PerformanceSnapshot } from './outcome-tracker';
 
 export interface DraftSkill {
@@ -37,7 +38,7 @@ export interface DetectedPattern {
   readonly successRate: number;
 }
 
-const DRAFTS_DIR = '.omk/skill-drafts';
+const DRAFTS_DIR = 'skill-drafts';
 
 export class SessionLearningEngine {
   private readonly draftsDir: string;
@@ -45,6 +46,7 @@ export class SessionLearningEngine {
   constructor(
     private readonly homedir: string,
     private readonly outcomeTracker: SessionOutcomeTracker,
+    private readonly memoryStore?: MemoryStore,
   ) {
     this.draftsDir = join(homedir, DRAFTS_DIR);
   }
@@ -60,6 +62,33 @@ export class SessionLearningEngine {
     const memorySuggestions = this.generateMemorySuggestions(patterns);
 
     return { draftSkills, soulSuggestions, memorySuggestions, patterns };
+  }
+
+  /**
+   * Persist memory suggestions to the MemoryStore so they are available
+   * for injection in future sessions.
+   */
+  async persistMemories(report: LearningReport): Promise<void> {
+    if (this.memoryStore === undefined) return;
+    for (const suggestion of report.memorySuggestions) {
+      await this.memoryStore.addMemory({
+        content: suggestion,
+        tags: ['learning', 'pattern'],
+        source: 'reflection',
+      });
+    }
+  }
+
+  /**
+   * Collect orchestration effectiveness insights and add them to the report.
+   */
+  private async collectOrchestrationInsights(report: LearningReport): Promise<void> {
+    // This is called after analyze() — effectiveness data comes from
+    // OrchestrationHooks which is not directly accessible here. Instead,
+    // insights should be passed in via the report or collected externally.
+    // For now this is a no-op placeholder; the caller (Session) can merge
+    // insights by reading hooks.effectivenessReport() and appending to
+    // memorySuggestions before persistMemories().
   }
 
   /**

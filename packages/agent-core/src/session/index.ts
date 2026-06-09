@@ -20,6 +20,8 @@ import { SessionTaskRegistry } from './task-registry';
 import { SessionFileLock } from './file-lock';
 import { SessionOutcomeTracker } from './outcome-tracker';
 import { SessionLearningEngine } from './learning-engine';
+import { MemoryStore } from './memory-store';
+import { OrchestrationHooks, buildMappingsFromConfig } from './orchestration-hooks';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
 import { parseBooleanEnv, resolveConfigValue, type BackgroundConfig } from '../config';
 import { makeErrorPayload } from '../errors';
@@ -139,6 +141,8 @@ export class Session {
   readonly fileLock: SessionFileLock;
   readonly outcomeTracker: SessionOutcomeTracker;
   readonly learningEngine: SessionLearningEngine;
+  readonly memoryStore: MemoryStore;
+  readonly orchestrationHooks: OrchestrationHooks;
   private readonly logHandle: SessionLogHandle | undefined;
   readonly hookEngine: HookEngine;
   readonly experimentalFlags: ExperimentalFlagResolver;
@@ -157,6 +161,7 @@ export class Session {
   private writeMetadataPromise = Promise.resolve();
   private loopState: { task: string; iteration: number; maxIterations: number; startTime: number } | null = null;
   private emitStatusTimer: ReturnType<typeof setTimeout> | undefined;
+  private shutdownHandler: NodeJS.SignalsListener | undefined;
 
   constructor(public readonly options: SessionOptions) {
     // Attach the per-session log sink up front so the constructor's
@@ -176,11 +181,25 @@ export class Session {
     this.sharedStore = new SessionSharedStore();
     this.costTracker = new SessionCostTracker();
     this.subagentCache = new SubagentResultCache();
+    const orchConfig = options.config?.orchestration;
+    this.orchestrationHooks = new OrchestrationHooks(
+      buildMappingsFromConfig(orchConfig?.mappings),
+      {
+        maxQueueSize: orchConfig?.maxQueueSize,
+        maxInjectionSize: orchConfig?.maxInjectionSize,
+        cooldownMs: orchConfig?.cooldownMs,
+        maxSkillRepetition: orchConfig?.maxSkillRepetition,
+      },
+    );
+    this.orchestrationHooks.setHomedir(options.homedir);
     this.healthMonitor = new SessionHealthMonitor();
-    this.taskRegistry = new SessionTaskRegistry();
+    this.taskRegistry = new SessionTaskRegistry(this.orchestrationHooks);
     this.fileLock = new SessionFileLock();
     this.outcomeTracker = new SessionOutcomeTracker();
-    this.learningEngine = new SessionLearningEngine(options.homedir, this.outcomeTracker);
+    this.memoryStore = new MemoryStore(options.kaos.getcwd());
+    this.learningEngine = new SessionLearningEngine(options.homedir, this.outcomeTracker, this.memoryStore);
+
+    this.registerShutdownHandler();
 
     // Load persisted store states
     void this.messageBus.load(options.homedir).catch(() => {});
@@ -193,6 +212,7 @@ export class Session {
     this.hookEngine = new HookEngine(options.hooks, {
       cwd: options.kaos.getcwd(),
       sessionId: options.id,
+      onOrchestrationEvent: (event) => this.orchestrationHooks.emit(event),
     });
     this.telemetry = options.telemetry ?? noopTelemetryClient;
     this.toolKaos = options.kaos;
@@ -250,6 +270,7 @@ export class Session {
 
   async resume(): Promise<{ warning?: string }> {
     await this.skillsReady;
+    await this.orchestrationHooks.load();
     const { agents } = await this.readMetadata();
     this.agents.clear();
     // Only the main agent is needed to reopen the session; subagents replay
@@ -270,7 +291,24 @@ export class Session {
     return { warning };
   }
 
+  private registerShutdownHandler(): void {
+    if (this.shutdownHandler !== undefined) return;
+    this.shutdownHandler = () => {
+      void this.close().then(() => process.exit(0)).catch(() => process.exit(1));
+    };
+    process.once('SIGINT', this.shutdownHandler);
+    process.once('SIGTERM', this.shutdownHandler);
+  }
+
+  private removeShutdownHandler(): void {
+    if (this.shutdownHandler === undefined) return;
+    process.off('SIGINT', this.shutdownHandler);
+    process.off('SIGTERM', this.shutdownHandler);
+    this.shutdownHandler = undefined;
+  }
+
   async close(): Promise<void> {
+    this.removeShutdownHandler();
     try {
       await Promise.allSettled(
         Array.from(this.readyAgents(), async (agent) => agent.cron?.stop()),
@@ -283,7 +321,22 @@ export class Session {
         this.fileLock.save(this.options.homedir),
         this.messageBus.save(this.options.homedir),
         this.sharedStore.save(this.options.homedir),
+        this.orchestrationHooks.save(),
       ]).catch(() => {});
+      // Persist learning outcomes to memory store for cross-session recall
+      try {
+        const report = await this.learningEngine.analyze();
+        // Merge orchestration effectiveness insights into learning memories
+        const insights = this.orchestrationHooks.generateEffectivenessInsights();
+        if (insights.length > 0) {
+          report.memorySuggestions.push(
+            ...insights,
+          );
+        }
+        await this.learningEngine.persistMemories(report);
+      } catch {
+        // Learning persistence is best-effort
+      }
     } finally {
       try {
         await this.mcp.shutdown();
@@ -334,6 +387,9 @@ export class Session {
     const homedir = config.homedir ?? join(this.options.homedir, 'agents', id);
     const parentAgentId = options.parentAgentId ?? null;
     const agent = this.instantiateAgent(id, homedir, type, config, parentAgentId);
+    if (type === 'main') {
+      this.orchestrationHooks.setAgent(agent);
+    }
     if (options.profile) {
       await this.bootstrapAgentProfile(agent, options.profile);
     }
@@ -555,10 +611,25 @@ export class Session {
         healthMonitor: this.healthMonitor,
         outcomeTracker: this.outcomeTracker,
         learningEngine: this.learningEngine,
+        memoryStore: this.memoryStore,
+        orchestrationHooks: this.orchestrationHooks,
         taskRegistry: this.taskRegistry,
         fileLock: this.fileLock,
         onTurnEnded: (turnId, durationMs, steps, failed) => {
           this.healthMonitor.recordTurn(durationMs, steps, failed);
+          if (failed && this.healthMonitor.checkDegraded()) {
+            const snapshot = this.healthMonitor.snapshot();
+            this.orchestrationHooks.emit({
+              type: 'health.degraded',
+              payload: {
+                reason: 'elevated_error_rate',
+                tokenBurnRatePerMin: snapshot.tokenBurnRatePerMin,
+                errorRate: snapshot.errorRate,
+                avgTurnDurationMs: snapshot.avgTurnDurationMs,
+                avgStepsPerTurn: snapshot.avgStepsPerTurn,
+              },
+            });
+          }
           this.outcomeTracker.recordTurn(turnId, steps, 'completed', failed, durationMs);
           this.scheduleEmitStatus();
         },
@@ -656,6 +727,9 @@ export class Session {
 
     try {
       const agent = this.instantiateAgent(id, meta.homedir, meta.type, {}, parentAgentId);
+      if (meta.type === 'main') {
+        this.orchestrationHooks.setAgent(agent);
+      }
       const result = await agent.resume();
       this.agents.set(id, agent);
       return { agent, warning: parent?.warning ?? result.warning };
@@ -702,7 +776,7 @@ export class Session {
     try {
       const reflection = this.outcomeTracker.generateReflection();
       if (reflection.length > 0) {
-        const memoryDir = join(this.options.homedir, '.omk', 'memory');
+        const memoryDir = join(this.options.homedir, 'memory');
         await mkdir(memoryDir, { recursive: true });
         await appendFile(join(memoryDir, 'reflections.md'), reflection + '\n\n', 'utf-8');
       }
@@ -789,6 +863,7 @@ export class Session {
       contextUsage,
       contextTokens,
       maxContextTokens,
+      orchestration: this.orchestrationHooks.metrics(),
     };
   }
 

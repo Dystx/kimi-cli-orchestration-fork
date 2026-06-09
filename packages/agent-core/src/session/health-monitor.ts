@@ -61,6 +61,17 @@ export class SessionHealthMonitor {
     }
   }
 
+  /** Lightweight check — returns true if recent turns show degradation signals. */
+  checkDegraded(windowMs = DEFAULT_WINDOW_MS): boolean {
+    const snapshot = this.snapshot(windowMs);
+    if (snapshot.totalTurns < 3) return false;
+    if (snapshot.errorRate > 0.3) return true;
+    if (snapshot.tokenBurnRatePerMin > 5000) return true;
+    if (snapshot.avgTurnDurationMs > 120000) return true;
+    if (snapshot.avgStepsPerTurn > 15) return true;
+    return false;
+  }
+
   snapshot(windowMs = DEFAULT_WINDOW_MS): HealthSnapshot {
     const now = Date.now();
     const cutoff = now - windowMs;

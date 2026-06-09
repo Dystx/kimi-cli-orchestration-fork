@@ -1044,7 +1044,22 @@ function configStateSnapshot(agent: Agent): ResumeStateSnapshot['config'] {
 }
 
 function emptyConfig(): KimiConfig {
-  return configWithProvider({ providers: {} }, MOCK_PROVIDER, undefined);
+  const config = configWithProvider({ providers: {} }, MOCK_PROVIDER, undefined);
+  const providerName = 'test-provider';
+  // Register model aliases used by default agent profiles so subagent tests
+  // can resolve profile-specific model overrides (architect/editor split).
+  const profileModels = ['kimi-k2.6'];
+  for (const model of profileModels) {
+    config.models = {
+      ...config.models,
+      [model]: {
+        provider: providerName,
+        model,
+        maxContextSize: 1_000_000,
+      },
+    };
+  }
+  return config;
 }
 
 function configWithProvider(

@@ -25,7 +25,7 @@ export type ReadReflectionsInput = z.infer<typeof ReadReflectionsInputSchema>;
 export class ReadReflectionsTool implements BuiltinTool<ReadReflectionsInput> {
   readonly name = 'ReadReflections';
   readonly description =
-    'Reads past session reflections from ~/.kimi-code/.omk/memory/reflections.md. Use this at the start of a session to recall what worked and what failed in previous sessions, then adapt your approach accordingly.';
+    'Reads past session reflections from ~/.kimi-code/memory/reflections.md. Use this at the start of a session to recall what worked and what failed in previous sessions, then adapt your approach accordingly.';
   readonly parameters: Record<string, unknown> = toInputJsonSchema(ReadReflectionsInputSchema);
 
   constructor(private readonly homedir: string) {}
@@ -40,7 +40,7 @@ export class ReadReflectionsTool implements BuiltinTool<ReadReflectionsInput> {
   }
 
   private async execution(args: ReadReflectionsInput): Promise<ExecutableToolResult> {
-    const path = `${this.homedir}/.omk/memory/reflections.md`;
+    const path = `${this.homedir}/memory/reflections.md`;
     try {
       const content = await readFile(path, 'utf-8');
       const sessions = content

@@ -5,8 +5,8 @@ import type { SkillRegistry } from '../skill';
 
 export const RawSubagentProfileSchema = z.object({
   description: z.string().optional(),
-  /** Internal field used during OMK-format normalization to preserve subagent file paths. */
-  _omkPath: z.string().optional(),
+  /** Internal field used during extended format normalization to preserve subagent file paths. */
+  _subagentPath: z.string().optional(),
 });
 
 export type RawSubagentProfile = z.infer<typeof RawSubagentProfileSchema>;
@@ -23,6 +23,10 @@ export const RawAgentProfileSchema = z.object({
   tools: z.array(z.string()).optional(),
   whenToUse: z.string().optional(),
   subagents: z.record(z.string(), RawSubagentProfileSchema).optional(),
+  /** Override the model alias for this profile. Enables architect/editor split. */
+  modelAlias: z.string().optional(),
+  /** Override the thinking level for this profile. */
+  thinkingLevel: z.string().optional(),
 });
 
 export type RawAgentProfile = z.infer<typeof RawAgentProfileSchema>;
@@ -57,4 +61,8 @@ export interface ResolvedAgentProfile {
   tools: string[];
   whenToUse?: string;
   subagents?: Record<string, ResolvedAgentProfile>;
+  /** Model alias override for this profile (enables architect/editor split). */
+  modelAlias?: string;
+  /** Thinking level override for this profile. */
+  thinkingLevel?: string;
 }

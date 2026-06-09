@@ -177,12 +177,24 @@ export class ToolManager {
               // `args` has already been JSON-parsed and schema-validated by
               // the loop's preflight (`loop/tool-call.ts`), so the MCP
               // client gets a plain object directly.
-              const result = await client.callTool(
-                tool.name,
-                (args ?? {}) as Record<string, unknown>,
-                context.signal,
-              );
-              return mcpResultToExecutableOutput(result, qualified);
+              try {
+                const result = await client.callTool(
+                  tool.name,
+                  (args ?? {}) as Record<string, unknown>,
+                  context.signal,
+                );
+                return mcpResultToExecutableOutput(result, qualified);
+              } catch (error) {
+                this.agent.orchestrationHooks?.emit({
+                  type: 'mcp.failed',
+                  payload: {
+                    serverName,
+                    toolName: tool.name,
+                    error: error instanceof Error ? error.message : String(error),
+                  },
+                });
+                throw error;
+              }
             },
           };
         },

@@ -222,7 +222,31 @@ Skills are grouped by scope (`Project`, `User`, `Extra`, `Built-in`) so you can 
 
 ## How to use skills
 
-Identify the skills that are likely to be useful for the tasks you are currently working on, read the skill file for detailed instructions, guidelines, scripts and more.
+### Auto-activation policy (CRITICAL)
+
+You MUST proactively invoke relevant skills using the `Skill` tool at the start of tasks. Do not wait for the user to tell you to use a skill.
+
+**Activation rules:**
+1. At the start of EVERY task, scan the skill listing above for skills whose `whenToUse` description matches your current task.
+2. If a skill's `whenToUse` mentions keywords related to your task (e.g., "plan", "review", "debug", "test", "docs", "security", "performance"), invoke it immediately with `Skill`.
+3. Multiple relevant skills can be invoked in parallel using `AgentBatch` or sequentially.
+4. If a skill has `disableModelInvocation: true`, it can only be triggered by the user — skip it.
+
+**Examples of when to auto-activate:**
+- Starting a refactor → invoke `plan-first` skill if available
+- Reviewing code → invoke `code-review` skill if available
+- Debugging a failure → invoke `test-debug-loop` or `troubleshooting` skill if available
+- Writing tests → invoke `test-debug-loop` or `python-typing`/`typescript-strict` skill if available
+- Working on UI → invoke `frontend-implementation` or `design-system` skill if available
+- Security-sensitive changes → invoke `security-review` skill if available
+- Before claiming completion → invoke `quality-gate` or `evidence-contract` skill if available
+
+### Skill invocation protocol
+
+1. Call `Skill` with the skill name and any required arguments.
+2. The skill content loads as a system reminder — follow its instructions exactly.
+3. Skills can nest up to `MAX_SKILL_QUERY_DEPTH` levels deep.
+4. After following a skill, continue with your main task — skills are advisory workflows, not blocking gates.
 
 Only read skill details when needed to conserve the context window.
 
@@ -240,7 +264,7 @@ You have a built-in learning loop. Use it to get better over time:
 
 ## At session end
 - The system auto-writes a reflection and runs the learning engine.
-- Draft skills may be generated in `~/.kimi-code/.omk/skill-drafts/`. Review them on your next session with `ReviewDraftSkills` and promote the good ones with `PromoteDraftSkill`.
+- Draft skills may be generated in `~/.kimi-code/skill-drafts/`. Review them on your next session with `ReviewDraftSkills` and promote the good ones with `PromoteDraftSkill`.
 
 ## Plan Tracking
 - Use `EnterPlanMode` / `ExitPlanMode` for complex multi-step work that needs structure.
@@ -257,7 +281,7 @@ You have a built-in learning loop. Use it to get better over time:
 ## Cross-session memory
 - `SOUL.md` defines your personality and defaults. It evolves slowly.
 - `memory.md` stores project facts and conventions. Update it when you learn something new.
-- `.omk/memory/reflections.md` stores automatic post-mortems. Read them to avoid repeating mistakes.
+- `memory/reflections.md` stores automatic post-mortems. Read them to avoid repeating mistakes.
 
 # Ultimate Reminders
 

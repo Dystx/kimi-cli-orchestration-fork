@@ -401,7 +401,9 @@ export class TurnFlow {
       }
 
       turnId = this.allocateTurnId();
-      turnInput = [{ type: 'text', text: GOAL_CONTINUATION_PROMPT }];
+      const orchContext = this.agent.orchestrationHooks?.getGoalContinuationContext();
+      const promptText = orchContext ? `${GOAL_CONTINUATION_PROMPT}\n\n${orchContext}` : GOAL_CONTINUATION_PROMPT;
+      turnInput = [{ type: 'text', text: promptText }];
       turnOrigin = GOAL_CONTINUATION_ORIGIN;
     }
   }
@@ -525,6 +527,12 @@ export class TurnFlow {
     const durationMs = Date.now() - startedAt;
     const steps = this.currentStepByTurn.get(turnId) ?? this.currentStep;
     const failed = ended.reason === 'failed';
+    // Record orchestration skill effectiveness
+    if (ended.reason === 'completed') {
+      this.agent.orchestrationHooks?.recordTurnOutcome('success');
+    } else if (ended.reason === 'failed') {
+      this.agent.orchestrationHooks?.recordTurnOutcome('failure');
+    }
     this.agent.onTurnEnded?.(turnId, durationMs, steps, failed);
 
     return { event: ended, stopReason: completedStopReason, blockedByUserPromptHook };

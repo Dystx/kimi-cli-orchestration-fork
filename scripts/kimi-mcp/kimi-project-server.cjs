@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * OMK Project MCP Server — minimal replacement for the oh-my-kimi project
- * memory MCP. Reads from and writes to `.omk/memory/` graph state and
+ * Kimi Project MCP Server — minimal project memory MCP.
+ * Reads from and writes to `.kimi-code/memory/` graph state and
  * markdown mirror files.
  *
  * Communicates over stdio using the Model Context Protocol (JSON-RPC 2.0).
@@ -11,12 +11,12 @@ const { readFile, writeFile, readdir } = require('node:fs/promises');
 const { join, dirname } = require('node:path');
 const { homedir } = require('node:os');
 
-const PROJECT_ROOT = process.env.OMK_PROJECT_ROOT || process.cwd();
-const MEMORY_DIR = join(PROJECT_ROOT, '.omk', 'memory');
+const PROJECT_ROOT = process.env.KIMI_PROJECT_ROOT || process.cwd();
+const MEMORY_DIR = join(PROJECT_ROOT, '.kimi-code', 'memory');
 const GRAPH_PATH = join(MEMORY_DIR, 'graph-state.json');
 
 // Startup diagnostics — written to stderr so MCP clients capture it in failure messages
-console.error(`[omk-project] started — cwd=${process.cwd()} OMK_PROJECT_ROOT=${process.env.OMK_PROJECT_ROOT || '(unset)'} PROJECT_ROOT=${PROJECT_ROOT}`);
+console.error(`[kimi-project] started — cwd=${process.cwd()} KIMI_PROJECT_ROOT=${process.env.KIMI_PROJECT_ROOT || '(unset)'} PROJECT_ROOT=${PROJECT_ROOT}`);
 
 // ---------------------------------------------------------------------------
 // Protocol helpers
@@ -125,7 +125,7 @@ async function listMemoryCategories() {
   try {
     entries = await readdir(MEMORY_DIR);
   } catch {
-    return { content: [{ type: 'text', text: 'No .omk/memory directory.' }] };
+    return { content: [{ type: 'text', text: 'No .kimi-code/memory directory.' }] };
   }
   const dirs = [];
   for (const e of entries) {
@@ -143,23 +143,23 @@ async function listMemoryCategories() {
 
 const TOOLS = [
   {
-    name: 'omk_read_memory',
-    description: 'Read memory entries from .omk/memory/ markdown mirrors.',
+    name: 'kimi_read_memory',
+    description: 'Read memory entries from .kimi-code/memory/ markdown mirrors.',
     inputSchema: {
       type: 'object',
       properties: {
-        category: { type: 'string', description: 'Optional subdirectory under .omk/memory/' },
+        category: { type: 'string', description: 'Optional subdirectory under .kimi-code/memory/' },
         filename: { type: 'string', description: 'Optional specific .md file to read.' },
       },
     },
   },
   {
-    name: 'omk_write_memory',
-    description: 'Write or append to a .omk/memory/ markdown mirror file.',
+    name: 'kimi_write_memory',
+    description: 'Write or append to a .kimi-code/memory/ markdown mirror file.',
     inputSchema: {
       type: 'object',
       properties: {
-        filename: { type: 'string', description: 'Target .md filename under .omk/memory/' },
+        filename: { type: 'string', description: 'Target .md filename under .kimi-code/memory/' },
         content: { type: 'string', description: 'Markdown content to write.' },
         append: { type: 'boolean', description: 'Append instead of overwrite.' },
       },
@@ -167,8 +167,8 @@ const TOOLS = [
     },
   },
   {
-    name: 'omk_graph_query',
-    description: 'Query the project-local ontology graph in .omk/memory/graph-state.json.',
+    name: 'kimi_graph_query',
+    description: 'Query the project-local ontology graph in .kimi-code/memory/graph-state.json.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -185,7 +185,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'omk_list_memory',
+    name: 'kimi_list_memory',
     description: 'List available memory categories and top-level markdown files.',
     inputSchema: {
       type: 'object',
@@ -195,10 +195,10 @@ const TOOLS = [
 ];
 
 const HANDLERS = {
-  omk_read_memory: readMemory,
-  omk_write_memory: writeMemory,
-  omk_graph_query: graphQuery,
-  omk_list_memory: listMemoryCategories,
+  kimi_read_memory: readMemory,
+  kimi_write_memory: writeMemory,
+  kimi_graph_query: graphQuery,
+  kimi_list_memory: listMemoryCategories,
 };
 
 // ---------------------------------------------------------------------------
@@ -215,7 +215,7 @@ async function handleRequest(request) {
     sendResult(id, {
       protocolVersion: '2024-11-05',
       capabilities: { tools: {} },
-      serverInfo: { name: 'omk-project', version: '0.1.0' },
+      serverInfo: { name: 'kimi-project', version: '0.1.0' },
     });
     return;
   }

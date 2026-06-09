@@ -55,7 +55,7 @@ export class LearnFromSessionTool implements BuiltinTool<LearnFromSessionInput> 
     }
 
     if (report.draftSkills.length > 0) {
-      lines.push(`Draft Skills (${writeDrafts ? 'written to ~/.kimi-code/.omk/skill-drafts/' : 'proposed'}):`);
+      lines.push(`Draft Skills (${writeDrafts ? 'written to ~/.kimi-code/skill-drafts/' : 'proposed'}):`);
       for (const d of report.draftSkills) {
         lines.push(`  • ${d.name} (${d.confidence} confidence)`);
         lines.push(`    ${d.description}`);

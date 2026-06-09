@@ -421,6 +421,16 @@ export class CronManager {
       origin,
       prompt: task.prompt,
     });
+    this.agent.orchestrationHooks?.emit({
+      type: 'cron.fired',
+      payload: {
+        jobId: task.id,
+        cron: task.cron,
+        recurring: task.recurring !== false,
+        coalescedCount: ctx.coalescedCount,
+        stale,
+      },
+    });
     const turnId = this.agent.turn.steer(content, origin);
     this.agent.telemetry.track(CRON_FIRED, {
       recurring: task.recurring !== false,

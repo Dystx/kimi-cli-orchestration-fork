@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'pathe';
+import type { OrchestrationHooks } from './orchestration-hooks';
 
 /**
  * SessionTaskRegistry — shared task list with dependency tracking for
@@ -32,6 +33,14 @@ export interface TaskRegistrySnapshot {
 export class SessionTaskRegistry {
   private tasks = new Map<string, Task>();
   private idCounter = 0;
+  private pendingUnblockEmits: Array<{ taskId: string; title: string; assignee?: string }> = [];
+  private hasActiveGoal = false;
+
+  constructor(private readonly orchestrationHooks?: OrchestrationHooks) {}
+
+  setGoalActive(active: boolean): void {
+    this.hasActiveGoal = active;
+  }
 
   create(
     title: string,
@@ -55,7 +64,33 @@ export class SessionTaskRegistry {
       updatedAt: Date.now(),
     };
     this.tasks.set(id, task);
-    this.recomputeBlockedStatuses();
+    const unblocked = this.recomputeBlockedStatuses();
+
+    this.orchestrationHooks?.emit({
+      type: 'task.created',
+      payload: {
+        taskId: id,
+        title,
+        status,
+        assignee: options.assignee,
+        dependencyCount: deps.length,
+        totalTaskCount: this.tasks.size,
+        hasActiveGoal: this.hasActiveGoal,
+      },
+    });
+
+    for (const unblockedId of unblocked) {
+      const t = this.tasks.get(unblockedId);
+      if (t !== undefined) {
+        this.pendingUnblockEmits.push({
+          taskId: unblockedId,
+          title: t.title,
+          assignee: t.assignee,
+        });
+      }
+    }
+    this.flushPendingUnblocks();
+
     return task;
   }
 
@@ -75,7 +110,33 @@ export class SessionTaskRegistry {
 
     // If this task changed status, recompute blocked states for dependents
     if (updates.status !== undefined) {
-      this.recomputeBlockedStatuses();
+      const unblocked = this.recomputeBlockedStatuses();
+
+      if (updates.status === 'completed' || updates.status === 'failed') {
+        this.orchestrationHooks?.emit({
+          type: updates.status === 'completed' ? 'task.completed' : 'task.failed',
+          payload: {
+            taskId: id,
+            title: updated.title,
+            status: updates.status,
+            result: updated.result,
+            assignee: updated.assignee,
+            dependencyCount: updated.dependencies.length,
+          },
+        });
+      }
+
+      for (const unblockedId of unblocked) {
+        const t = this.tasks.get(unblockedId);
+        if (t !== undefined) {
+          this.pendingUnblockEmits.push({
+            taskId: unblockedId,
+            title: t.title,
+            assignee: t.assignee,
+          });
+        }
+      }
+      this.flushPendingUnblocks();
     }
 
     return updated;
@@ -129,19 +190,42 @@ export class SessionTaskRegistry {
     return false;
   }
 
-  private recomputeBlockedStatuses(): void {
+  /** Recompute blocked statuses and return IDs of tasks that transitioned blocked→pending. */
+  private recomputeBlockedStatuses(): string[] {
+    const unblocked: string[] = [];
     for (const [id, task] of this.tasks) {
       const shouldBeBlocked = this.isBlocked(task.dependencies);
       if (shouldBeBlocked && task.status !== 'blocked') {
         this.tasks.set(id, { ...task, status: 'blocked', updatedAt: Date.now() });
       } else if (!shouldBeBlocked && task.status === 'blocked') {
         this.tasks.set(id, { ...task, status: 'pending', updatedAt: Date.now() });
+        unblocked.push(id);
       }
     }
+    return unblocked;
+  }
+
+  /** Flush deferred unblock events on next microtask to avoid creation-time spam. */
+  private flushPendingUnblocks(): void {
+    if (this.pendingUnblockEmits.length === 0) return;
+    const pending = [...this.pendingUnblockEmits];
+    this.pendingUnblockEmits = [];
+    queueMicrotask(() => {
+      for (const item of pending) {
+        this.orchestrationHooks?.emit({
+          type: 'task.unblocked',
+          payload: {
+            taskId: item.taskId,
+            title: item.title,
+            assignee: item.assignee,
+          },
+        });
+      }
+    });
   }
 
   async save(homedir: string): Promise<void> {
-    const path = join(homedir, '.omk', 'state', 'tasks.json');
+    const path = join(homedir, 'state', 'tasks.json');
     await mkdir(dirname(path), { recursive: true });
     await writeFile(
       path,
@@ -152,7 +236,7 @@ export class SessionTaskRegistry {
 
   async load(homedir: string): Promise<void> {
     try {
-      const path = join(homedir, '.omk', 'state', 'tasks.json');
+      const path = join(homedir, 'state', 'tasks.json');
       const text = await readFile(path, 'utf-8');
       const data = JSON.parse(text) as { tasks?: Task[]; idCounter?: number };
       if (Array.isArray(data.tasks)) {

@@ -1,5 +1,5 @@
 /**
- * OrchestrationContext groups OMK-specific session managers and callbacks
+ * OrchestrationContext groups fork-specific session managers and callbacks
  * into a single interface.  This reduces AgentOptions/Agent constructor churn
  * during upstream merges — instead of adding N new optional fields to
  * AgentOptions, fork-specific subsystems are passed as one cohesive context.
@@ -13,6 +13,7 @@ import type { SessionSharedStore } from './shared-store';
 import type { SessionOutcomeTracker } from './outcome-tracker';
 import type { SessionLearningEngine } from './learning-engine';
 import type { MemoryStore } from './memory-store';
+import type { OrchestrationHooks } from './orchestration-hooks';
 import type { SessionTaskRegistry } from './task-registry';
 import type { SessionFileLock } from './file-lock';
 
@@ -25,6 +26,7 @@ export interface OrchestrationContext {
   readonly outcomeTracker?: SessionOutcomeTracker;
   readonly learningEngine?: SessionLearningEngine;
   readonly memoryStore?: MemoryStore;
+  readonly orchestrationHooks?: OrchestrationHooks;
   readonly taskRegistry?: SessionTaskRegistry;
   readonly fileLock?: SessionFileLock;
   readonly onTurnEnded?:

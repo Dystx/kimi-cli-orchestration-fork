@@ -4,6 +4,12 @@ import { join } from 'pathe';
 
 const MAX_ENTRIES = 1000;
 
+/** BM25 hyper-parameters. */
+const BM25_K1 = 1.5;
+const BM25_B = 0.75;
+/** How many times each tag term is repeated in the pseudo-document. */
+const TAG_WEIGHT = 3;
+
 export interface MemoryEntry {
   readonly id: string;
   readonly timestamp: number;
@@ -13,11 +19,68 @@ export interface MemoryEntry {
   readonly relevanceScore?: number;
 }
 
+interface Bm25Document {
+  readonly id: string;
+  readonly terms: string[];
+  readonly length: number;
+}
+
+class Bm25Scorer {
+  private readonly avgdl: number;
+  private readonly idf: Map<string, number>;
+
+  constructor(documents: readonly Bm25Document[]) {
+    const totalLength = documents.reduce((sum, d) => sum + d.length, 0);
+    this.avgdl = totalLength / documents.length || 1;
+
+    const df = new Map<string, number>();
+    for (const doc of documents) {
+      const seen = new Set(doc.terms);
+      for (const term of seen) {
+        df.set(term, (df.get(term) ?? 0) + 1);
+      }
+    }
+
+    const N = documents.length;
+    this.idf = new Map();
+    for (const [term, freq] of df) {
+      // Lucene-style BM25 IDF — always non-negative.
+      this.idf.set(term, Math.log(1 + (N - freq + 0.5) / (freq + 0.5)));
+    }
+  }
+
+  score(doc: Bm25Document, queryTerms: readonly string[]): number {
+    let score = 0;
+    const termFreq = new Map<string, number>();
+    for (const term of doc.terms) {
+      termFreq.set(term, (termFreq.get(term) ?? 0) + 1);
+    }
+
+    for (const term of queryTerms) {
+      const idf = this.idf.get(term) ?? 0;
+      const tf = termFreq.get(term) ?? 0;
+      if (tf === 0) continue;
+      const numerator = tf * (BM25_K1 + 1);
+      const denominator = tf + BM25_K1 * (1 - BM25_B + BM25_B * (doc.length / this.avgdl));
+      score += idf * (numerator / denominator);
+    }
+
+    return score;
+  }
+}
+
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 1);
+}
+
 export class MemoryStore {
   private readonly memoryDir: string;
 
   constructor(baseDir: string) {
-    this.memoryDir = join(baseDir, '.omk', 'memory');
+    this.memoryDir = join(baseDir, '.kimi-code', 'memory');
   }
 
   async loadMemories(): Promise<MemoryEntry[]> {
@@ -46,24 +109,43 @@ export class MemoryStore {
     }
   }
 
-  async findRelevant(query: string, tags?: string[], limit = 10, workDirTag?: string): Promise<MemoryEntry[]> {
+  async findRelevant(
+    query: string,
+    tags?: string[],
+    limit = 10,
+    workDirTag?: string,
+  ): Promise<MemoryEntry[]> {
     const memories = await this.loadMemories();
-    const queryLower = query.toLowerCase().trim();
-    const queryWords = queryLower.split(/\s+/).filter((w) => w.length > 2);
-    const hasQuery = queryLower.length > 0 && queryWords.length > 0;
+    if (memories.length === 0) return [];
 
-    const scored = memories.map((memory) => {
-      let baseScore = 0;
-      const contentLower = memory.content.toLowerCase();
+    const queryTerms = tokenize(query);
+    const hasQuery = queryTerms.length > 0;
+
+    // Build BM25 documents: content + weighted tags
+    const docs: Bm25Document[] = memories.map((m) => {
+      const terms = tokenize(m.content);
+      for (const tag of m.tags) {
+        const tagTerms = tokenize(tag);
+        for (let i = 0; i < TAG_WEIGHT; i++) {
+          terms.push(...tagTerms);
+        }
+      }
+      return { id: m.id, terms, length: terms.length };
+    });
+
+    const scorer = new Bm25Scorer(docs);
+
+    const scored = memories.map((memory, index) => {
+      const doc = docs[index]!;
       const tagsLower = memory.tags.map((t) => t.toLowerCase());
 
-      // Exact phrase match
-      if (contentLower.includes(queryLower)) baseScore += 5;
+      // Base relevance via BM25
+      let score = hasQuery ? scorer.score(doc, queryTerms) : 0;
 
-      // Word-level matches
-      for (const word of queryWords) {
-        if (contentLower.includes(word)) baseScore += 2;
-        if (tagsLower.some((t) => t.includes(word))) baseScore += 3;
+      // Exact phrase match adds a strong signal on top of BM25
+      const queryLower = query.toLowerCase().trim();
+      if (queryLower.length > 0 && memory.content.toLowerCase().includes(queryLower)) {
+        score += 3;
       }
 
       // Explicit tag filter
@@ -71,16 +153,16 @@ export class MemoryStore {
       if (tags !== undefined) {
         for (const tag of tags) {
           if (tagsLower.includes(tag.toLowerCase())) {
-            baseScore += 4;
+            score += 2;
             tagMatch = true;
           }
         }
       }
 
-      // WorkDir affinity — boost memories tagged with current workDir
+      // WorkDir affinity
       let workDirMatch = false;
       if (workDirTag !== undefined && tagsLower.includes(workDirTag.toLowerCase())) {
-        baseScore += 6;
+        score += 4;
         workDirMatch = true;
       }
 
@@ -89,11 +171,12 @@ export class MemoryStore {
         return { memory, score: 0 };
       }
 
-      // Apply recency and source boosts only to already-relevant memories
-      let score = baseScore;
+      // Recency boost (decays over ~5 days)
       const ageDays = (Date.now() - memory.timestamp) / (1000 * 60 * 60 * 24);
-      score += Math.max(0, 5 - ageDays);
-      if (memory.source === 'reflection') score += 1;
+      score += Math.max(0, 3 - ageDays * 0.5);
+
+      // Source boost: reflections are highest-value learnings
+      if (memory.source === 'reflection') score += 0.5;
 
       return { memory, score };
     });
@@ -102,7 +185,7 @@ export class MemoryStore {
       .filter(({ score }) => score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
-      .map(({ memory, score }) => ({ ...memory, relevanceScore: score }));
+      .map(({ memory, score }) => ({ ...memory, relevanceScore: Math.round(score * 100) / 100 }));
   }
 
   async addMemory(entry: Omit<MemoryEntry, 'id' | 'timestamp'>): Promise<MemoryEntry> {

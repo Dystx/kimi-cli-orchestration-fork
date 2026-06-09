@@ -63,4 +63,13 @@ export interface SessionStatusSnapshot {
   readonly contextUsage: number;
   readonly contextTokens: number;
   readonly maxContextTokens: number;
+
+  // Orchestration
+  readonly orchestration: {
+    readonly queueDepth: number;
+    readonly historyDepth: number;
+    readonly skillsTriggered: number;
+    readonly skillsSuppressed: number;
+    readonly eventsEmitted: number;
+  };
 }

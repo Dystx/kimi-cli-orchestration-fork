@@ -136,6 +136,26 @@ export const ServicesConfigSchema = z.object({
 
 export type ServicesConfig = z.infer<typeof ServicesConfigSchema>;
 
+export const OrchestrationMappingSchema = z.object({
+  event: z.string(),
+  skill: z.string(),
+  condition: z.string().optional(),
+  priority: z.number().int().optional(),
+});
+
+export type OrchestrationMappingConfig = z.infer<typeof OrchestrationMappingSchema>;
+
+export const OrchestrationConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  mappings: z.array(OrchestrationMappingSchema).optional(),
+  maxQueueSize: z.number().int().min(1).max(1000).optional(),
+  maxInjectionSize: z.number().int().min(1).max(50000).optional(),
+  cooldownMs: z.number().int().min(0).optional(),
+  maxSkillRepetition: z.number().int().min(1).optional(),
+});
+
+export type OrchestrationConfig = z.infer<typeof OrchestrationConfigSchema>;
+
 const McpServerCommonFields = {
   enabled: z.boolean().optional(),
   startupTimeoutMs: z.number().int().min(1).optional(),
@@ -204,6 +224,7 @@ export const KimiConfigSchema = z.object({
   extraSkillDirs: z.array(z.string()).optional(),
   loopControl: LoopControlSchema.optional(),
   background: BackgroundConfigSchema.optional(),
+  orchestration: OrchestrationConfigSchema.optional(),
   experimental: ExperimentalConfigSchema.optional(),
   telemetry: z.boolean().optional(),
   raw: z.record(z.string(), z.unknown()).optional(),
@@ -217,6 +238,7 @@ const ThinkingConfigPatchSchema = ThinkingConfigSchema.partial();
 const PermissionConfigPatchSchema = PermissionConfigSchema.partial();
 const LoopControlPatchSchema = LoopControlSchema.partial();
 const BackgroundConfigPatchSchema = BackgroundConfigSchema.partial();
+const OrchestrationConfigPatchSchema = OrchestrationConfigSchema.partial();
 const ExperimentalConfigPatchSchema = ExperimentalConfigSchema;
 const MoonshotServiceConfigPatchSchema = MoonshotServiceConfigSchema.partial();
 const ServicesConfigPatchSchema = z.object({
@@ -243,6 +265,7 @@ export const KimiConfigPatchSchema = z
     extraSkillDirs: z.array(z.string()).optional(),
     loopControl: LoopControlPatchSchema.optional(),
     background: BackgroundConfigPatchSchema.optional(),
+    orchestration: OrchestrationConfigPatchSchema.optional(),
     experimental: ExperimentalConfigPatchSchema.optional(),
     telemetry: z.boolean().optional(),
   })

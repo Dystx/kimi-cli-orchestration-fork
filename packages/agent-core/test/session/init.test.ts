@@ -627,6 +627,12 @@ function testProviderManager(): ProviderManager {
           model: MOCK_PROVIDER.model,
           maxContextSize: 1_000_000,
         },
+        'kimi-k2.6': {
+          provider: 'test',
+          model: 'kimi-k2.6',
+          maxContextSize: 1_000_000,
+        },
+
       },
     },
   });

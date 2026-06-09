@@ -293,9 +293,13 @@ describe('SessionSubagentHost', () => {
     );
     expect(child.agent.config.data()).toMatchObject({
       cwd: parent.agent.config.cwd,
-      provider: parent.agent.config.data().provider,
       profileName: 'explore',
+      modelAlias: 'kimi-k2.6',
       thinkingLevel: parent.agent.config.thinkingLevel,
+    });
+    expect(child.agent.config.data().provider).toMatchObject({
+      type: 'kimi',
+      model: 'kimi-k2.6',
     });
     expect(child.agent.config.systemPrompt).toContain('codebase exploration specialist');
     expect(child.agent.permission.mode).toBe('yolo');
@@ -1030,7 +1034,24 @@ describe('SessionSubagentHost', () => {
     const child = testAgent({
       generate,
       initialConfig: {
-        providers: {},
+        providers: {
+          test: {
+            type: 'kimi',
+            apiKey: 'test-key',
+          },
+        },
+        models: {
+          'kimi-k2.6': {
+            provider: 'test',
+            model: 'kimi-k2.6',
+            maxContextSize: 1_000_000,
+          },
+          'mock-model': {
+            provider: 'test',
+            model: 'mock-model',
+            maxContextSize: 1_000_000,
+          },
+        },
         loopControl: { maxRetriesPerStep: 1 },
       },
     });

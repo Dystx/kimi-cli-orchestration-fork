@@ -41,7 +41,7 @@ export class SessionMessageBus {
   }
 
   async save(homedir: string): Promise<void> {
-    const path = join(homedir, '.omk', 'state', 'messages.json');
+    const path = join(homedir, 'state', 'messages.json');
     await mkdir(dirname(path), { recursive: true });
     const data: Record<string, AgentMessage[]> = {};
     for (const [agentId, messages] of this.queues) {
@@ -52,7 +52,7 @@ export class SessionMessageBus {
 
   async load(homedir: string): Promise<void> {
     try {
-      const path = join(homedir, '.omk', 'state', 'messages.json');
+      const path = join(homedir, 'state', 'messages.json');
       const text = await readFile(path, 'utf-8');
       const data = JSON.parse(text) as Record<string, AgentMessage[]>;
       for (const [agentId, messages] of Object.entries(data)) {
