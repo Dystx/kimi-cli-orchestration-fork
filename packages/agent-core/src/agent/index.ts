@@ -18,12 +18,12 @@ import type { McpConnectionManager } from '../mcp';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { ModelProvider } from '../session/provider-manager';
+import type { SessionSubagentHost } from '../session/subagent-host';
+import type { OrchestrationContext } from '../session/orchestration-context';
 import type { SessionCostTracker } from '../session/cost-tracker';
-import type { SessionGoalStore } from '../session/goal';
 import type { SubagentResultCache } from '../session/subagent-cache';
 import type { SessionMessageBus } from '../session/message-bus';
 import type { SessionSharedStore } from '../session/shared-store';
-import type { SessionSubagentHost } from '../session/subagent-host';
 import type { SkillRegistry } from '../skill';
 import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
 import type { PromisableMethods } from '../utils/types';
@@ -94,34 +94,9 @@ export interface AgentOptions {
   readonly telemetry?: TelemetryClient | undefined;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
   readonly appVersion?: string;
-  readonly messageBus?: SessionMessageBus | undefined;
-  readonly sharedStore?: SessionSharedStore | undefined;
-  readonly costTracker?: SessionCostTracker | undefined;
-  readonly subagentCache?: SubagentResultCache | undefined;
-  readonly healthMonitor?: import('../session/health-monitor').SessionHealthMonitor;
-  readonly outcomeTracker?: import('../session/outcome-tracker').SessionOutcomeTracker;
-  readonly learningEngine?: import('../session/learning-engine').SessionLearningEngine;
-  readonly taskRegistry?: import('../session/task-registry').SessionTaskRegistry;
-  readonly fileLock?: import('../session/file-lock').SessionFileLock;
+  /** OMK fork-specific session managers and lifecycle callbacks. */
+  readonly orchestration?: OrchestrationContext;
   readonly onUsageRecorded?: UsageRecordCallback | undefined;
-  readonly onTurnEnded?:
-    | ((turnId: number, durationMs: number, steps: number, failed: boolean) => void)
-    | undefined;
-  readonly onToolExecuted?:
-    | ((toolName: string, isError: boolean, durationMs?: number) => void)
-    | undefined;
-  readonly onSubagentCompleted?:
-    | ((
-        profileName: string,
-        isError: boolean,
-        options: {
-          tokenUsage?: { input: number; output: number };
-          durationMs?: number;
-          fallbackUsed?: boolean;
-          cached?: boolean;
-        },
-      ) => void)
-    | undefined;
   readonly experimentalFlags?: ExperimentalFlagResolver;
 }
 
@@ -146,6 +121,11 @@ export class Agent {
   readonly log: Logger;
   readonly telemetry: TelemetryClient;
   readonly appVersion?: string;
+  readonly orchestration?: OrchestrationContext;
+  readonly onUsageRecorded?: UsageRecordCallback | undefined;
+  readonly experimentalFlags: ExperimentalFlagResolver;
+
+  // OMK orchestration subsystems (populated from orchestration context).
   readonly messageBus?: SessionMessageBus;
   readonly sharedStore?: SessionSharedStore;
   readonly costTracker?: SessionCostTracker;
@@ -153,6 +133,7 @@ export class Agent {
   readonly healthMonitor?: import('../session/health-monitor').SessionHealthMonitor;
   readonly outcomeTracker?: import('../session/outcome-tracker').SessionOutcomeTracker;
   readonly learningEngine?: import('../session/learning-engine').SessionLearningEngine;
+  readonly memoryStore?: import('../session/memory-store').MemoryStore;
   readonly taskRegistry?: import('../session/task-registry').SessionTaskRegistry;
   readonly fileLock?: import('../session/file-lock').SessionFileLock;
   readonly onTurnEnded?:
@@ -173,7 +154,6 @@ export class Agent {
         },
       ) => void)
     | undefined;
-  readonly experimentalFlags: ExperimentalFlagResolver;
 
   readonly blobStore: BlobStore | undefined;
   readonly records: AgentRecords;
@@ -211,18 +191,22 @@ export class Agent {
     this.mcp = options.mcp;
     this.hooks = options.hookEngine;
     this.appVersion = options.appVersion;
-    this.messageBus = options.messageBus;
-    this.sharedStore = options.sharedStore;
-    this.costTracker = options.costTracker;
-    this.subagentCache = options.subagentCache;
-    this.healthMonitor = options.healthMonitor;
-    this.outcomeTracker = options.outcomeTracker;
-    this.learningEngine = options.learningEngine;
-    this.taskRegistry = options.taskRegistry;
-    this.fileLock = options.fileLock;
-    this.onTurnEnded = options.onTurnEnded;
-    this.onToolExecuted = options.onToolExecuted;
-    this.onSubagentCompleted = options.onSubagentCompleted;
+    this.orchestration = options.orchestration;
+    this.onUsageRecorded = options.onUsageRecorded;
+    const orch = options.orchestration;
+    this.messageBus = orch?.messageBus;
+    this.sharedStore = orch?.sharedStore;
+    this.costTracker = orch?.costTracker;
+    this.subagentCache = orch?.subagentCache;
+    this.healthMonitor = orch?.healthMonitor;
+    this.outcomeTracker = orch?.outcomeTracker;
+    this.learningEngine = orch?.learningEngine;
+    this.memoryStore = orch?.memoryStore;
+    this.taskRegistry = orch?.taskRegistry;
+    this.fileLock = orch?.fileLock;
+    this.onTurnEnded = orch?.onTurnEnded;
+    this.onToolExecuted = orch?.onToolExecuted;
+    this.onSubagentCompleted = orch?.onSubagentCompleted;
     this.log = options.log ?? log;
     this.telemetry = options.telemetry ?? noopTelemetryClient;
     this.experimentalFlags = options.experimentalFlags ?? new FlagResolver();

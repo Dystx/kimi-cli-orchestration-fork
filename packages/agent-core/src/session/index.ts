@@ -53,6 +53,7 @@ import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
 import type { SessionStatusSnapshot } from './status';
 
 export type { SessionStatusSnapshot } from './status';
+export type { OrchestrationContext } from './orchestration-context';
 
 export interface SessionOptions {
   readonly kaos: Kaos;
@@ -546,15 +547,30 @@ export class Session {
       log: this.log.createChild({ agentId: id }),
       pluginSessionStarts: type === 'main' ? this.options.pluginSessionStarts : undefined,
       appVersion: this.options.appVersion,
-      messageBus: this.messageBus,
-      sharedStore: this.sharedStore,
-      costTracker: this.costTracker,
-      subagentCache: this.subagentCache,
-      healthMonitor: this.healthMonitor,
-      outcomeTracker: this.outcomeTracker,
-      learningEngine: this.learningEngine,
-      taskRegistry: this.taskRegistry,
-      fileLock: this.fileLock,
+      orchestration: {
+        messageBus: this.messageBus,
+        sharedStore: this.sharedStore,
+        costTracker: this.costTracker,
+        subagentCache: this.subagentCache,
+        healthMonitor: this.healthMonitor,
+        outcomeTracker: this.outcomeTracker,
+        learningEngine: this.learningEngine,
+        taskRegistry: this.taskRegistry,
+        fileLock: this.fileLock,
+        onTurnEnded: (turnId, durationMs, steps, failed) => {
+          this.healthMonitor.recordTurn(durationMs, steps, failed);
+          this.outcomeTracker.recordTurn(turnId, steps, 'completed', failed, durationMs);
+          this.scheduleEmitStatus();
+        },
+        onToolExecuted: (toolName, isError, durationMs) => {
+          this.outcomeTracker.recordTool(toolName, isError, durationMs);
+          this.scheduleEmitStatus();
+        },
+        onSubagentCompleted: (profileName, isError, options) => {
+          this.outcomeTracker.recordSubagent(profileName, isError, options);
+          this.scheduleEmitStatus();
+        },
+      },
       onUsageRecorded: (model, usage) => {
         this.costTracker.record(model, usage);
         this.healthMonitor.recordUsage(model, usage);
@@ -565,19 +581,6 @@ export class Session {
         if (budgetAlert.level === 'warn' && budgetAlert.message !== undefined) {
           this.log.warn(budgetAlert.message);
         }
-        this.scheduleEmitStatus();
-      },
-      onTurnEnded: (turnId, durationMs, steps, failed) => {
-        this.healthMonitor.recordTurn(durationMs, steps, failed);
-        this.outcomeTracker.recordTurn(turnId, steps, 'completed', failed, durationMs);
-        this.scheduleEmitStatus();
-      },
-      onToolExecuted: (toolName, isError, durationMs) => {
-        this.outcomeTracker.recordTool(toolName, isError, durationMs);
-        this.scheduleEmitStatus();
-      },
-      onSubagentCompleted: (profileName, isError, options) => {
-        this.outcomeTracker.recordSubagent(profileName, isError, options);
         this.scheduleEmitStatus();
       },
       experimentalFlags: this.experimentalFlags,
