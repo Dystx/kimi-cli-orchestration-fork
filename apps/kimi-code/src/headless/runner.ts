@@ -439,7 +439,7 @@ async function forceHeadlessPermission(
   return restorePermission;
 }
 
-function requireConfiguredModel(...models: readonly (string | undefined)[]): string {
+export function requireConfiguredModel(...models: readonly (string | undefined)[]): string {
   const model = configuredModel(...models);
   if (model === undefined) {
     throw new Error(
@@ -449,16 +449,16 @@ function requireConfiguredModel(...models: readonly (string | undefined)[]): str
   return model;
 }
 
-function configuredModel(...models: readonly (string | undefined)[]): string | undefined {
+export function configuredModel(...models: readonly (string | undefined)[]): string | undefined {
   return models.find((model) => model !== undefined && model.trim().length > 0);
 }
 
-function installHeadlessHandlers(session: Session): void {
+export function installHeadlessHandlers(session: Session): void {
   session.setApprovalHandler(() => ({ decision: 'approved' }));
   session.setQuestionHandler(() => null);
 }
 
-function installHeadlessTerminationCleanup(
+export function installHeadlessTerminationCleanup(
   promptProcess: NodeJS.Process,
   cleanup: () => Promise<void>,
 ): () => void {
@@ -482,7 +482,7 @@ function installHeadlessTerminationCleanup(
   };
 }
 
-async function extractUsage(session: Session): Promise<{ cost: number; tokens: number }> {
+export async function extractUsage(session: Session): Promise<{ cost: number; tokens: number }> {
   try {
     const usage = await session.getUsage();
     const total = usage.total;
@@ -496,11 +496,11 @@ async function extractUsage(session: Session): Promise<{ cost: number; tokens: n
   }
 }
 
-function hasTurnId(event: Event): event is Event & { readonly turnId: number } {
+export function hasTurnId(event: Event): event is Event & { readonly turnId: number } {
   return 'turnId' in event;
 }
 
-function formatTurnEndedFailure(event: Extract<Event, { type: 'turn.ended' }>): string {
+export function formatTurnEndedFailure(event: Extract<Event, { type: 'turn.ended' }>): string {
   if (event.error !== undefined) return `${event.error.code}: ${event.error.message}`;
   return `Prompt turn ended with reason: ${event.reason}`;
 }
