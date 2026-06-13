@@ -5,7 +5,7 @@ import type { Logger } from '#/logging/types';
 import type { Tool } from '@moonshot-ai/kosong';
 
 import { abortable } from '../utils/abort';
-import { HttpMcpClient } from './client-http';
+import { HttpMcpClient, isTerminalTransportError } from './client-http';
 import type { UnexpectedCloseReason } from './client-shared';
 import { StdioMcpClient } from './client-stdio';
 import type { McpOAuthService } from './oauth';
@@ -35,6 +35,11 @@ interface InternalEntry {
 export type McpStatusListener = (entry: McpServerEntry) => void;
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_RETRY_DELAY_MS = 1_000;
+const MAX_RETRY_DELAY_MS = 30_000;
+const DEFAULT_STDIO_CONCURRENCY = 4;
+const DEFAULT_READY_TIMEOUT_MS = 5_000;
 
 type RuntimeMcpClient = StdioMcpClient | HttpMcpClient;
 
@@ -408,6 +413,35 @@ export class McpConnectionManager {
   }
 }
 
+class Semaphore {
+  private permits: number;
+  private readonly queue: Array<() => void> = [];
+
+  constructor(permits: number) {
+    this.permits = permits;
+  }
+
+  acquire(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.permits > 0) {
+        this.permits -= 1;
+        resolve();
+      } else {
+        this.queue.push(resolve);
+      }
+    });
+  }
+
+  release(): void {
+    const next = this.queue.shift();
+    if (next !== undefined) {
+      next();
+    } else {
+      this.permits += 1;
+    }
+  }
+}
+
 function toPublicEntry(entry: InternalEntry): McpServerEntry {
   return {
     name: entry.name,
@@ -434,6 +468,21 @@ function computeEnabledNames(config: McpServerConfig, tools: readonly Tool[]): S
     allowed.add(name);
   }
   return allowed;
+}
+
+function computeRetryDelay(attemptIndex: number, baseDelayMs: number): number {
+  const exponential = baseDelayMs * 2 ** attemptIndex;
+  const capped = Math.min(exponential, MAX_RETRY_DELAY_MS);
+  return Math.floor(Math.random() * (capped + 1)); // full jitter
+}
+
+function isRetryableStartupError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.message.includes('Timed out after')) return true;
+  if (isTerminalTransportError(error)) return true;
+  if (error instanceof KimiError && error.code === ErrorCodes.CONFIG_INVALID) return false;
+  if (isUnauthorizedLikeError(error)) return false;
+  return true;
 }
 
 function isUnauthorizedLikeError(error: unknown): boolean {
