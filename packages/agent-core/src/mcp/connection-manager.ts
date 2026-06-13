@@ -470,19 +470,41 @@ function computeEnabledNames(config: McpServerConfig, tools: readonly Tool[]): S
   return allowed;
 }
 
+/**
+ * Computes a full-jitter exponential backoff delay for startup retries.
+ *
+ * The returned delay is in the range `[0, min(baseDelayMs * 2^attemptIndex,
+ * MAX_RETRY_DELAY_MS)]`. Invalid inputs are normalized so callers cannot
+ * accidentally request a negative or zero delay window.
+ */
 function computeRetryDelay(attemptIndex: number, baseDelayMs: number): number {
+  if (attemptIndex < 0) attemptIndex = 0;
+  if (baseDelayMs <= 0) baseDelayMs = DEFAULT_RETRY_DELAY_MS;
   const exponential = baseDelayMs * 2 ** attemptIndex;
   const capped = Math.min(exponential, MAX_RETRY_DELAY_MS);
-  return Math.floor(Math.random() * (capped + 1)); // full jitter
+  return Math.floor(Math.random() * (capped + 1));
 }
 
+/**
+ * Determines whether a startup failure should be retried at the manager layer.
+ *
+ * Auth errors are intentionally non-retryable: they transition the entry into
+ * `needs-auth` so the OAuth flow can run. Config-level errors are also
+ * non-retryable to fail fast. Timeouts and terminal transport errors are the
+ * primary retryable cases.
+ */
 function isRetryableStartupError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
-  if (error.message.includes('Timed out after')) return true;
-  if (isTerminalTransportError(error)) return true;
-  if (error instanceof KimiError && error.code === ErrorCodes.CONFIG_INVALID) return false;
+  // Auth failures go through the needs-auth flow, not retries.
   if (isUnauthorizedLikeError(error)) return false;
-  return true;
+  // Config-level problems should fail fast.
+  if (error instanceof KimiError && error.code === ErrorCodes.CONFIG_INVALID) return false;
+  // Timeouts are the main pain point.
+  if (error.message.includes('Timed out after')) return true;
+  // HTTP reconnect exhaustion from the SDK is retryable at the manager layer.
+  if (isTerminalTransportError(error)) return true;
+  // Be conservative: unknown errors are not retried.
+  return false;
 }
 
 function isUnauthorizedLikeError(error: unknown): boolean {
