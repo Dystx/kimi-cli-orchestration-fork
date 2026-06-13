@@ -197,6 +197,7 @@ describe('McpConnectionManager', () => {
         command: process.execPath,
         args: ['-e', delayedMockServer],
         startupTimeoutMs: 2_000,
+        maxRetries: 0,
       },
     });
 
@@ -300,6 +301,7 @@ describe('McpConnectionManager', () => {
           command: process.execPath,
           args: [slowFixture],
           startupTimeoutMs: 100,
+          maxRetries: 0,
         },
       });
       const entry = cm.get('slow');
@@ -319,6 +321,7 @@ describe('McpConnectionManager', () => {
         command: process.execPath,
         args: [hangingListFixture],
         startupTimeoutMs: 100,
+        maxRetries: 0,
       },
     });
     try {
@@ -714,6 +717,7 @@ describe('Session MCP startup', () => {
             command: process.execPath,
             args: [slowStdioFixture],
             startupTimeoutMs: 2_000,
+            maxRetries: 0,
           },
         },
       },

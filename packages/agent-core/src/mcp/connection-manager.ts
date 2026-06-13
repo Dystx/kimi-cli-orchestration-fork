@@ -320,6 +320,20 @@ export class McpConnectionManager {
       entry.nextRetryAt = Date.now() + delayMs;
       entry.retryCount = attemptIndex + 1;
 
+      const reason = error instanceof Error ? error.message : String(error);
+      this.log.warn('mcp server retrying connection', {
+        server: entry.name,
+        transport: entry.config.transport,
+        attempt: attemptIndex + 1,
+        maxRetries,
+        nextDelayMs: delayMs,
+        reason,
+      });
+
+      entry.status = 'pending';
+      entry.error = `${entry.name}: retrying connection (attempt ${attemptIndex + 1}/${maxRetries}) in ${delayMs}ms: ${reason}`;
+      this.emit(entry);
+
       try {
         await abortable(delay(delayMs), abortController.signal);
       } catch {
@@ -328,9 +342,6 @@ export class McpConnectionManager {
       }
 
       if (!this.isCurrent(entry, attemptId)) return;
-      entry.status = 'pending';
-      entry.error = undefined;
-      this.emit(entry);
     }
   }
 
@@ -358,6 +369,7 @@ export class McpConnectionManager {
       entry.enabledNames = computeEnabledNames(entry.config, tools);
       entry.status = 'connected';
       entry.lastError = undefined;
+      entry.error = undefined;
       this.watchForUnexpectedClose(entry, startupClient, attemptId);
     } catch (error) {
       if (!this.isCurrent(entry, attemptId)) {
