@@ -181,6 +181,7 @@ export class McpConnectionManager {
   async connect(name: string, config: McpServerConfig): Promise<void> {
     const previous = this.entries.get(name);
     if (previous !== undefined) {
+      previous.retryAbortController?.abort();
       await this.closeClient(previous);
     }
     const disabled = config.enabled === false;
@@ -194,13 +195,14 @@ export class McpConnectionManager {
     this.entries.set(name, entry);
     this.emit(entry);
     if (!disabled) {
-      await this.connectOne(entry, this.beginConnectAttempt(entry));
+      await this.connectOneWithRetry(entry, this.beginConnectAttempt(entry));
     }
   }
 
   async remove(name: string): Promise<boolean> {
     const entry = this.entries.get(name);
     if (entry === undefined) return false;
+    entry.retryAbortController?.abort();
     await this.closeClient(entry);
     entry.status = 'disabled';
     entry.tools = undefined;
@@ -237,7 +239,7 @@ export class McpConnectionManager {
       this.entries.set(name, entry);
       this.emit(entry);
       if (!disabled) {
-        tasks.push(this.connectOne(entry, this.beginConnectAttempt(entry)));
+        tasks.push(this.connectOneWithRetry(entry, this.beginConnectAttempt(entry)));
       }
     }
     await Promise.allSettled(tasks);
@@ -265,7 +267,7 @@ export class McpConnectionManager {
     entry.enabledNames = undefined;
     entry.error = undefined;
     this.emit(entry);
-    await this.connectOne(entry, attemptId);
+    await this.connectOneWithRetry(entry, attemptId);
   }
 
   async shutdown(): Promise<void> {
@@ -276,6 +278,70 @@ export class McpConnectionManager {
     }
     const tasks = entries.map((entry) => this.closeClient(entry));
     await Promise.allSettled(tasks);
+  }
+
+  private async connectOneWithRetry(entry: InternalEntry, attemptId: number): Promise<void> {
+    const maxRetries = entry.config.maxRetries ?? DEFAULT_MAX_RETRIES;
+    const baseDelayMs = entry.config.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+
+    // Cancel any pending retry delay from a previous attempt and install a
+    // fresh controller for this attempt.
+    entry.retryAbortController?.abort();
+    const abortController = new AbortController();
+    entry.retryAbortController = abortController;
+
+    for (let attemptIndex = 0; attemptIndex <= maxRetries; attemptIndex++) {
+      if (!this.isCurrent(entry, attemptId)) return;
+      entry.retryCount = attemptIndex;
+      entry.nextRetryAt = undefined;
+
+      const needsSemaphore = entry.config.transport === 'stdio';
+      if (needsSemaphore) {
+        // Bail out immediately if the attempt was aborted while we were
+        // waiting for a stdio permit.
+        if (abortController.signal.aborted) return;
+        await this.stdioSemaphore.acquire();
+      }
+
+      try {
+        await this.connectOne(entry, attemptId);
+      } finally {
+        if (needsSemaphore) {
+          this.stdioSemaphore.release();
+        }
+      }
+
+      if (!this.isCurrent(entry, attemptId)) return;
+
+      if (entry.status === 'connected') {
+        entry.retryCount = 0;
+        entry.nextRetryAt = undefined;
+        entry.lastError = undefined;
+        entry.retryAbortController = undefined;
+        return;
+      }
+
+      const error = entry.lastError;
+      if (!isRetryableStartupError(error)) return;
+
+      if (attemptIndex >= maxRetries) return;
+
+      const delayMs = computeRetryDelay(attemptIndex, baseDelayMs);
+      entry.nextRetryAt = Date.now() + delayMs;
+      entry.retryCount = attemptIndex + 1;
+
+      try {
+        await abortable(delay(delayMs), abortController.signal);
+      } catch {
+        // Aborted during the delay; drop out silently.
+        return;
+      }
+
+      if (!this.isCurrent(entry, attemptId)) return;
+      entry.status = 'pending';
+      entry.error = undefined;
+      this.emit(entry);
+    }
   }
 
   private async connectOne(entry: InternalEntry, attemptId: number): Promise<void> {
@@ -301,6 +367,7 @@ export class McpConnectionManager {
       entry.tools = tools;
       entry.enabledNames = computeEnabledNames(entry.config, tools);
       entry.status = 'connected';
+      entry.lastError = undefined;
       this.watchForUnexpectedClose(entry, startupClient, attemptId);
     } catch (error) {
       if (!this.isCurrent(entry, attemptId)) {
@@ -309,6 +376,7 @@ export class McpConnectionManager {
         }
         return;
       }
+      entry.lastError = error;
       if (this.shouldMarkNeedsAuth(entry, error)) {
         entry.status = 'needs-auth';
         entry.error = `${entry.name} requires OAuth — run /mcp-config login ${entry.name}`;
@@ -579,6 +647,12 @@ function stderrTail(client: RuntimeMcpClient | undefined): string | undefined {
   const snapshot = client.stderrSnapshot();
   if (snapshot.length === 0) return undefined;
   return snapshot.trimEnd();
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 async function withTimeout<T>(
