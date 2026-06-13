@@ -587,23 +587,66 @@ function computeRetryDelay(attemptIndex: number, baseDelayMs: number): number {
 /**
  * Determines whether a startup failure should be retried at the manager layer.
  *
- * Auth errors are intentionally non-retryable: they transition the entry into
- * `needs-auth` so the OAuth flow can run. Config-level errors are also
- * non-retryable to fail fast. Timeouts and terminal transport errors are the
- * primary retryable cases.
+ * Retryable errors are: timeouts, spawn transient errors (EAGAIN, EBUSY, EMFILE,
+ * ENFILE, ENOMEM), HTTP 5xx responses, SSE reconnect exhaustion, and any other
+ * Error instance that is not explicitly classified as non-retryable.
+ *
+ * Non-retryable errors are: auth/401 errors (they transition the entry into
+ * `needs-auth`), config validation errors (`CONFIG_INVALID`), missing command
+ * (`ENOENT`), permission denied (`EACCES`), and non-Error values.
  */
 function isRetryableStartupError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
+
   // Auth failures go through the needs-auth flow, not retries.
   if (isUnauthorizedLikeError(error)) return false;
+
   // Config-level problems should fail fast.
   if (error instanceof KimiError && error.code === ErrorCodes.CONFIG_INVALID) return false;
+
+  const code = (error as { code?: unknown }).code;
+
+  // Missing command or permission denied are permanent spawn failures.
+  if (code === 'ENOENT' || code === 'EACCES') return false;
+
+  // Known transient spawn/resource-pressure errors.
+  if (
+    code === 'EAGAIN' ||
+    code === 'EBUSY' ||
+    code === 'EMFILE' ||
+    code === 'ENFILE' ||
+    code === 'ENOMEM'
+  ) {
+    return true;
+  }
+
   // Timeouts are the main pain point.
   if (error.message.includes('Timed out after')) return true;
+
   // HTTP reconnect exhaustion from the SDK is retryable at the manager layer.
   if (isTerminalTransportError(error)) return true;
-  // Be conservative: unknown errors are not retried.
-  return false;
+
+  // HTTP 5xx responses are retryable.
+  if (isHttp5xxError(error)) return true;
+
+  // Treat unspecified errors as potentially transient.
+  return true;
+}
+
+function isHttp5xxError(error: Error): boolean {
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === 'number' && code >= 500 && code <= 599) return true;
+  if (typeof code === 'string' && /^5\d{2}$/.test(code)) return true;
+
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  if (typeof statusCode === 'number' && statusCode >= 500 && statusCode <= 599) return true;
+  if (typeof statusCode === 'string' && /^5\d{2}$/.test(statusCode)) return true;
+
+  const status = (error as { status?: unknown }).status;
+  if (typeof status === 'number' && status >= 500 && status <= 599) return true;
+  if (typeof status === 'string' && /^5\d{2}$/.test(status)) return true;
+
+  return /\b5\d{2}\b/.test(error.message);
 }
 
 function isUnauthorizedLikeError(error: unknown): boolean {
