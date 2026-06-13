@@ -166,6 +166,11 @@ export class McpConnectionManager {
   }
 
   connectAll(configs: Record<string, McpServerConfig>): Promise<void> {
+    // Cancel any in-flight retry delays from a previous connectAll before
+    // replacing entries; otherwise old timers keep running.
+    for (const entry of this.entries.values()) {
+      entry.retryAbortController?.abort();
+    }
     const attemptId = ++this.initialLoadAttemptId;
     this.initialLoadStartedAt = Date.now();
     this.initialLoadFinishedAt = undefined;
@@ -301,6 +306,12 @@ export class McpConnectionManager {
         // waiting for a stdio permit.
         if (abortController.signal.aborted) return;
         await this.stdioSemaphore.acquire();
+        // The acquire may have resolved after the controller was aborted;
+        // release the permit and return without spawning the child process.
+        if (abortController.signal.aborted) {
+          this.stdioSemaphore.release();
+          return;
+        }
       }
 
       try {
@@ -589,9 +600,9 @@ function computeEnabledNames(config: McpServerConfig, tools: readonly Tool[]): S
 /**
  * Computes a full-jitter exponential backoff delay for startup retries.
  *
- * The returned delay is in the range `[0, min(baseDelayMs * 2^attemptIndex,
- * MAX_RETRY_DELAY_MS)]`. Invalid inputs are normalized so callers cannot
- * accidentally request a negative or zero delay window.
+ * The returned delay is uniformly distributed in the inclusive range
+ * `[0, min(baseDelayMs * 2^attemptIndex, MAX_RETRY_DELAY_MS)]`. Invalid inputs
+ * are normalized so callers cannot accidentally request a negative delay.
  */
 function computeRetryDelay(attemptIndex: number, baseDelayMs: number): number {
   if (attemptIndex < 0) attemptIndex = 0;
