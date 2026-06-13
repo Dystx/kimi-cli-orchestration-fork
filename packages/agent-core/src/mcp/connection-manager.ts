@@ -305,7 +305,12 @@ export class McpConnectionManager {
         // Bail out immediately if the attempt was aborted while we were
         // waiting for a stdio permit.
         if (abortController.signal.aborted) return;
-        await this.stdioSemaphore.acquire();
+        try {
+          await this.stdioSemaphore.acquire(abortController.signal);
+        } catch {
+          // Aborted while queued for a stdio permit.
+          return;
+        }
         // The acquire may have resolved after the controller was aborted;
         // release the permit and return without spawning the child process.
         if (abortController.signal.aborted) {
@@ -548,13 +553,45 @@ class Semaphore {
     this.permits = permits;
   }
 
-  acquire(): Promise<void> {
-    return new Promise((resolve) => {
-      if (this.permits > 0) {
+  acquire(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) {
+      return Promise.reject(signal.reason);
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      let onAbort: (() => void) | undefined;
+
+      const cleanup = () => {
+        if (onAbort !== undefined && signal !== undefined) {
+          signal.removeEventListener('abort', onAbort);
+        }
+      };
+
+      const allocate = () => {
         this.permits -= 1;
+        cleanup();
         resolve();
-      } else {
+      };
+
+      const enqueue = () => {
+        if (signal !== undefined) {
+          onAbort = () => {
+            const index = this.queue.indexOf(resolve);
+            if (index !== -1) {
+              this.queue.splice(index, 1);
+            }
+            cleanup();
+            reject(signal.reason);
+          };
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
         this.queue.push(resolve);
+      };
+
+      if (this.permits > 0) {
+        allocate();
+      } else {
+        enqueue();
       }
     });
   }
