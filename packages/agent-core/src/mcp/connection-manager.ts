@@ -30,6 +30,11 @@ interface InternalEntry {
   enabledNames?: ReadonlySet<string>;
   error?: string;
   client?: RuntimeMcpClient;
+  // Retry state.
+  retryCount: number;
+  nextRetryAt?: number;
+  lastError?: unknown;
+  retryAbortController?: AbortController;
 }
 
 export type McpStatusListener = (entry: McpServerEntry) => void;
@@ -75,7 +80,10 @@ export class McpConnectionManager {
   private readonly entries = new Map<string, InternalEntry>();
   private readonly listeners = new Set<McpStatusListener>();
   private initialLoad: Promise<void> = Promise.resolve();
+  private initialLoadReady: Promise<void> = Promise.resolve();
+  private initialLoadSettled: Promise<void> = Promise.resolve();
   private initialLoadAttemptId = 0;
+  private readonly stdioSemaphore = new Semaphore(DEFAULT_STDIO_CONCURRENCY);
   private initialLoadStartedAt: number | undefined;
   private initialLoadFinishedAt: number | undefined;
 
@@ -170,6 +178,7 @@ export class McpConnectionManager {
       name,
       config,
       attemptId: 0,
+      retryCount: 0,
       status: disabled ? 'disabled' : 'pending',
     };
     this.entries.set(name, entry);
@@ -212,6 +221,7 @@ export class McpConnectionManager {
         name,
         config,
         attemptId: 0,
+        retryCount: 0,
         status: disabled ? 'disabled' : 'pending',
       };
       this.entries.set(name, entry);
@@ -231,6 +241,12 @@ export class McpConnectionManager {
     if (entry.config.enabled === false) {
       throw new KimiError(ErrorCodes.MCP_SERVER_DISABLED, `MCP server is disabled: ${name}`);
     }
+    entry.retryCount = 0;
+    entry.nextRetryAt = undefined;
+    entry.lastError = undefined;
+    entry.error = undefined;
+    entry.retryAbortController?.abort();
+    entry.retryAbortController = undefined;
     const attemptId = this.beginConnectAttempt(entry);
     await this.closeClient(entry);
     if (!this.isCurrent(entry, attemptId)) return;
@@ -245,6 +261,9 @@ export class McpConnectionManager {
   async shutdown(): Promise<void> {
     const entries = Array.from(this.entries.values());
     this.entries.clear();
+    for (const entry of entries) {
+      entry.retryAbortController?.abort();
+    }
     const tasks = entries.map((entry) => this.closeClient(entry));
     await Promise.allSettled(tasks);
   }
