@@ -139,6 +139,8 @@ const McpServerCommonFields = {
   enabled: z.boolean().optional(),
   startupTimeoutMs: z.number().int().min(1).optional(),
   toolTimeoutMs: z.number().int().min(1).optional(),
+  maxRetries: z.number().int().min(0).max(10).optional(),
+  retryDelayMs: z.number().int().min(100).optional(),
   enabledTools: z.array(z.string()).optional(),
   disabledTools: z.array(z.string()).optional(),
 } as const;
