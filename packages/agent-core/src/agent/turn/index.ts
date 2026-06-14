@@ -614,7 +614,7 @@ export class TurnFlow {
     let stopHookContinuationUsed = false;
     let goalOutcomeMessageContinuationUsed = false;
     const deduper = new ToolCallDeduplicator({ telemetry: this.agent.telemetry });
-    await this.agent.mcp?.waitForInitialLoad(signal);
+    await this.agent.mcp?.waitForInitialLoad({ readyTimeoutMs: 5_000, signal });
     // Surface the active goal at the start of the turn (append-only; no-op when
     // there is no active goal). Each goal continuation is its own turn, so this
     // re-injects the reminder once per turn rather than per step, preserving prompt caching.
