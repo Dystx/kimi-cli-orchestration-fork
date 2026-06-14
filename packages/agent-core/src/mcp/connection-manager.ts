@@ -40,7 +40,11 @@ interface InternalEntry {
 export type McpStatusListener = (entry: McpServerEntry) => void;
 
 export interface WaitForInitialLoadOptions {
-  /** Return early after this many milliseconds. */
+  /**
+   * Return early after this many milliseconds. The promise resolves when the
+   * budget elapses even if no server has connected yet, so a session does not
+   * stall on permanently broken servers.
+   */
   readyTimeoutMs?: number;
   /** Return early once this many servers are connected. */
   minReadyCount?: number;
@@ -256,6 +260,16 @@ export class McpConnectionManager {
 
     const options = signalOrOptions;
     options.signal?.throwIfAborted();
+
+    // If no readiness budget/count is provided, treat the options object as a
+    // full-settlement wait (optionally abortable).
+    if (options.readyTimeoutMs === undefined && options.minReadyCount === undefined) {
+      if (options.signal === undefined) {
+        return this.initialLoadSettled;
+      }
+      return abortable(this.initialLoadSettled, options.signal);
+    }
+
     return this.createReadyPromise(options, this.initialLoadAttemptId);
   }
 
