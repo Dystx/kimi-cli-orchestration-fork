@@ -96,6 +96,7 @@ export class McpConnectionManager {
   private initialLoadReady: Promise<void> = Promise.resolve();
   private initialLoadSettled: Promise<void> = Promise.resolve();
   private initialLoadAttemptId = 0;
+  private readonly initialLoadStarted: { promise: Promise<void>; resolve: () => void };
   private readonly stdioSemaphore = new Semaphore(DEFAULT_STDIO_CONCURRENCY);
   private initialLoadStartedAt: number | undefined;
   private initialLoadFinishedAt: number | undefined;
@@ -111,6 +112,12 @@ export class McpConnectionManager {
   constructor(private readonly options: McpConnectionManagerOptions = {}) {
     this.oauthService = options.oauthService;
     this.log = options.log ?? defaultLog;
+
+    let resolveStarted: () => void = () => {};
+    const startedPromise = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+    this.initialLoadStarted = { promise: startedPromise, resolve: resolveStarted };
   }
 
   /**
@@ -195,6 +202,7 @@ export class McpConnectionManager {
     }
     await Promise.allSettled(removals);
 
+    this.initialLoadStarted.resolve();
     const attemptId = ++this.initialLoadAttemptId;
     this.initialLoadStartedAt = Date.now();
     this.initialLoadFinishedAt = undefined;
@@ -280,6 +288,14 @@ export class McpConnectionManager {
       return abortable(this.initialLoadSettled, options.signal);
     }
 
+    // If waitForInitialLoad(options) is called before the first connectAll,
+    // wait for that load to start so we don't resolve against an empty entry set.
+    if (this.initialLoadAttemptId === 0) {
+      return this.initialLoadStarted.promise.then(() =>
+        this.createReadyPromise(options, this.initialLoadAttemptId),
+      );
+    }
+
     return this.createReadyPromise(options, this.initialLoadAttemptId);
   }
 
@@ -293,7 +309,12 @@ export class McpConnectionManager {
     options: WaitForInitialLoadOptions,
     attemptId: number,
   ): Promise<void> {
-    const { readyTimeoutMs = DEFAULT_READY_TIMEOUT_MS, minReadyCount, signal } = options;
+    const { readyTimeoutMs, minReadyCount, signal } = options;
+    // Only apply the default readiness budget when the caller did not supply
+    // either a timeout or a minimum connected count. A caller asking only for
+    // minReadyCount should wait until that count is reached.
+    const effectiveTimeoutMs =
+      readyTimeoutMs ?? (minReadyCount === undefined ? DEFAULT_READY_TIMEOUT_MS : undefined);
 
     return new Promise<void>((resolve, reject) => {
       if (signal?.aborted) {
@@ -356,10 +377,12 @@ export class McpConnectionManager {
         }
       };
 
-      timer = setTimeout(() => {
-        cleanup();
-        resolve();
-      }, readyTimeoutMs);
+      if (effectiveTimeoutMs !== undefined) {
+        timer = setTimeout(() => {
+          cleanup();
+          resolve();
+        }, effectiveTimeoutMs);
+      }
 
       listener = () => {
         tryResolve();
