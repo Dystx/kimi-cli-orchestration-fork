@@ -5,7 +5,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { testKaos } from '../fixtures/test-kaos';
-import type { ProviderConfig } from '@moonshot-ai/kosong';
+import type { ProviderConfig, Tool } from '@moonshot-ai/kosong';
 import { describe, expect, it } from 'vitest';
 
 import { randomUUID } from 'node:crypto';
@@ -22,8 +22,10 @@ import { z } from 'zod';
 
 import { KimiError } from '../../src/errors';
 import { ProviderManager } from '../../src/session/provider-manager';
+import type { McpServerConfig } from '../../src/config/schema';
 import { McpConnectionManager, type McpServerEntry } from '../../src/mcp/connection-manager';
 import { JsonFileStore, McpOAuthService } from '../../src/mcp/oauth';
+import type { MCPToolDefinition } from '../../src/mcp/types';
 import type { AgentEvent, SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { SessionAPIImpl } from '../../src/session/rpc';
@@ -63,6 +65,121 @@ function sessionRpc(options: {
     requestQuestion: async () => null,
     toolCall: async () => ({ output: '' }),
   } as unknown as SDKSessionRPC;
+}
+
+type FakeStep =
+  | { type: 'success'; tools?: MCPToolDefinition[] }
+  | { type: 'error'; error: Error }
+  | { type: 'hang'; tools?: MCPToolDefinition[] };
+
+class FakeMcpClient {
+  private inFlightResolve?: () => void;
+  inFlight = false;
+  constructor(
+    readonly name: string,
+    readonly attemptIndex: number,
+    private readonly steps: FakeStep[],
+  ) {}
+
+  async connect(): Promise<void> {
+    const step = this.steps[this.attemptIndex] ?? { type: 'error', error: new Error('no behavior') };
+    if (step.type === 'hang') {
+      this.inFlight = true;
+      await new Promise<void>((resolve) => {
+        this.inFlightResolve = resolve;
+      });
+      this.inFlight = false;
+      return;
+    }
+    if (step.type === 'error') throw step.error;
+  }
+
+  async listTools(): Promise<MCPToolDefinition[]> {
+    const step = this.steps[this.attemptIndex];
+    if (step === undefined) throw new Error('no behavior');
+    if (step.type === 'error') throw step.error;
+    return step.tools ?? [fakeMcpTool('echo')];
+  }
+
+  async close(): Promise<void> {
+    this.release();
+  }
+
+  onUnexpectedClose(): void {}
+
+  stderrSnapshot(): string {
+    return '';
+  }
+
+  release(): void {
+    const resolve = this.inFlightResolve;
+    this.inFlightResolve = undefined;
+    resolve?.();
+  }
+}
+
+class TestMcpConnectionManager extends McpConnectionManager {
+  readonly behaviors = new Map<string, FakeStep[]>();
+  readonly clients = new Map<string, FakeMcpClient>();
+  private readonly attemptCountByName = new Map<string, number>();
+
+  setBehavior(name: string, steps: FakeStep[]): void {
+    this.behaviors.set(name, steps);
+  }
+
+  createClientAttemptCount(name: string): number {
+    return this.attemptCountByName.get(name) ?? 0;
+  }
+
+  protected override createClient(
+    _config: McpServerConfig,
+    name: string,
+  ): ReturnType<McpConnectionManager['createClient']> {
+    const attemptIndex = this.attemptCountByName.get(name) ?? 0;
+    this.attemptCountByName.set(name, attemptIndex + 1);
+    const steps = this.behaviors.get(name);
+    if (steps === undefined) throw new Error(`No fake behavior for ${name}`);
+    const client = new FakeMcpClient(name, attemptIndex, steps);
+    this.clients.set(name, client);
+    return client as unknown as ReturnType<McpConnectionManager['createClient']>;
+  }
+}
+
+function fakeStdioConfig(overrides: {
+  maxRetries?: number;
+  retryDelayMs?: number;
+  startupTimeoutMs?: number;
+} = {}) {
+  return {
+    transport: 'stdio' as const,
+    command: 'node',
+    args: [],
+    ...overrides,
+  };
+}
+
+function fakeHttpConfig(overrides: { maxRetries?: number } = {}) {
+  return {
+    transport: 'http' as const,
+    url: 'http://example.invalid/mcp',
+    ...overrides,
+  };
+}
+
+function fakeTool(name: string): Tool {
+  return {
+    name,
+    description: `${name} tool`,
+    parameters: { type: 'object', properties: {} },
+  };
+}
+
+function fakeMcpTool(name: string): MCPToolDefinition {
+  return {
+    name,
+    description: `${name} tool`,
+    inputSchema: { type: 'object', properties: {} },
+  };
 }
 
 describe('McpConnectionManager', () => {
@@ -924,6 +1041,132 @@ describe('Session MCP startup', () => {
       await rm(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
     }
   }, 10_000);
+});
+
+describe('McpConnectionManager retry/ready semantics', () => {
+  it('retries transient failures until the server connects', async () => {
+    const cm = new TestMcpConnectionManager();
+    cm.setBehavior('flaky', [
+      { type: 'error', error: new Error('Timed out after 100ms') },
+      { type: 'error', error: new Error('Timed out after 100ms') },
+      { type: 'success', tools: [fakeMcpTool('echo')] },
+    ]);
+
+    const start = Date.now();
+    const ready = cm.connectAll({
+      flaky: fakeStdioConfig({ maxRetries: 3, retryDelayMs: 50 }),
+    });
+
+    await cm.waitForInitialLoad();
+    await ready;
+
+    const duration = Date.now() - start;
+    const entry = cm.get('flaky');
+    expect(entry?.status).toBe('connected');
+    expect(entry?.toolCount).toBe(1);
+    expect(cm.createClientAttemptCount('flaky')).toBeGreaterThanOrEqual(3);
+    expect(duration).toBeGreaterThan(10);
+  }, 3000);
+
+  it('does not retry auth errors', async () => {
+    const storeDir = await mkdtemp(join(tmpdir(), 'kimi-mcp-fake-oauth-'));
+    const oauthService = new McpOAuthService({ store: new JsonFileStore(storeDir) });
+    const cm = new TestMcpConnectionManager({ oauthService });
+    const authError = new Error('Unauthorized');
+    authError.name = 'UnauthorizedError';
+    cm.setBehavior('gated', [{ type: 'error', error: authError }]);
+
+    const ready = cm.connectAll({ gated: fakeHttpConfig({ maxRetries: 3 }) });
+    await cm.waitForInitialLoad();
+    await ready;
+
+    const entry = cm.get('gated');
+    expect(entry?.status).toBe('needs-auth');
+    await rm(storeDir, { recursive: true, force: true });
+  }, 3000);
+
+  it('waitForInitialLoad() with no args waits for full settlement', async () => {
+    const cm = new TestMcpConnectionManager();
+    cm.setBehavior('slow', [{ type: 'hang' }]);
+
+    void cm.connectAll({ slow: fakeStdioConfig() });
+    // Give connectAll a chance to create the fake client.
+    await sleep(10);
+
+    const client = cm.clients.get('slow');
+    expect(client).toBeDefined();
+
+    let settled = false;
+    const settledPromise = cm.waitForInitialLoad().then(() => {
+      settled = true;
+    });
+
+    await sleep(50);
+    expect(settled).toBe(false);
+
+    client!.release();
+    await settledPromise;
+    expect(settled).toBe(true);
+    expect(cm.get('slow')?.status).toBe('connected');
+  }, 3000);
+
+  it('waitForInitialLoad({ readyTimeoutMs }) returns at the budget', async () => {
+    const cm = new TestMcpConnectionManager();
+    cm.setBehavior('slow', [{ type: 'hang' }]);
+
+    void cm.connectAll({ slow: fakeStdioConfig() });
+    await sleep(10);
+
+    const client = cm.clients.get('slow');
+    expect(client).toBeDefined();
+
+    const start = Date.now();
+    await cm.waitForInitialLoad({ readyTimeoutMs: 50 });
+    const duration = Date.now() - start;
+    expect(duration).toBeGreaterThanOrEqual(40);
+    expect(duration).toBeLessThan(200);
+
+    expect(cm.get('slow')?.status).toBe('pending');
+
+    client!.release();
+    await cm.waitForInitialLoad();
+    expect(cm.get('slow')?.status).toBe('connected');
+  }, 3000);
+
+  it('limits in-flight stdio connections to the semaphore capacity', async () => {
+    const cm = new TestMcpConnectionManager();
+    const names = ['a', 'b', 'c', 'd', 'e', 'f'] as const;
+    for (const name of names) {
+      cm.setBehavior(name, [{ type: 'hang' }]);
+    }
+
+    void cm.connectAll(
+      Object.fromEntries(names.map((name) => [name, fakeStdioConfig()])) as Record<
+        (typeof names)[number],
+        ReturnType<typeof fakeStdioConfig>
+      >,
+    );
+
+    await sleep(60);
+    const inFlightCount = names.filter((name) => cm.clients.get(name)?.inFlight).length;
+    expect(inFlightCount).toBeLessThanOrEqual(4);
+
+    // Keep releasing clients as queued ones acquire the stdio semaphore so the
+    // whole batch eventually settles.
+    const releaseAll = () => {
+      for (const name of names) {
+        cm.clients.get(name)?.release();
+      }
+    };
+    releaseAll();
+    const interval = setInterval(releaseAll, 30);
+    await cm.waitForInitialLoad();
+    clearInterval(interval);
+
+    for (const name of names) {
+      expect(cm.get(name)?.status).toBe('connected');
+    }
+  }, 3000);
 });
 
 function testProviderManager(): ProviderManager {
