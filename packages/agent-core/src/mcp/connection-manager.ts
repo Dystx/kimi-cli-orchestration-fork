@@ -351,7 +351,7 @@ export class McpConnectionManager {
       this.emit(entry);
 
       try {
-        await abortable(delay(delayMs), abortController.signal);
+        await delay(delayMs, abortController.signal);
       } catch {
         // Aborted during the delay; drop out silently.
         return;
@@ -557,9 +557,13 @@ class Semaphore {
       };
 
       const enqueue = () => {
+        const queuedResolve = () => {
+          cleanup();
+          resolve();
+        };
         if (signal !== undefined) {
           onAbort = () => {
-            const index = this.queue.indexOf(resolve);
+            const index = this.queue.indexOf(queuedResolve);
             if (index !== -1) {
               this.queue.splice(index, 1);
             }
@@ -568,7 +572,7 @@ class Semaphore {
           };
           signal.addEventListener('abort', onAbort, { once: true });
         }
-        this.queue.push(resolve);
+        this.queue.push(queuedResolve);
       };
 
       if (this.permits > 0) {
@@ -735,9 +739,27 @@ function stderrTail(client: RuntimeMcpClient | undefined): string | undefined {
   return snapshot.trimEnd();
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let onAbort: (() => void) | undefined;
+    const timer = setTimeout(() => {
+      if (onAbort !== undefined && signal !== undefined) {
+        signal.removeEventListener('abort', onAbort);
+      }
+      resolve();
+    }, ms);
+    if (signal === undefined) {
+      return;
+    }
+    onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
   });
 }
 
