@@ -172,12 +172,25 @@ export class McpConnectionManager {
     };
   }
 
-  connectAll(configs: Record<string, McpServerConfig>): Promise<void> {
+  async connectAll(configs: Record<string, McpServerConfig>): Promise<void> {
     // Cancel any in-flight retry delays from a previous connectAll before
     // replacing entries; otherwise old timers keep running.
     for (const entry of this.entries.values()) {
       entry.retryAbortController?.abort();
     }
+
+    // Close and drop entries that are no longer present in the new config so
+    // they do not leak into list(), telemetry, or readiness checks.
+    const newNames = new Set(Object.keys(configs));
+    const removals: Promise<void>[] = [];
+    for (const [name, entry] of this.entries) {
+      if (!newNames.has(name)) {
+        removals.push(this.closeClient(entry));
+        this.entries.delete(name);
+      }
+    }
+    await Promise.allSettled(removals);
+
     const attemptId = ++this.initialLoadAttemptId;
     this.initialLoadStartedAt = Date.now();
     this.initialLoadFinishedAt = undefined;
@@ -293,6 +306,17 @@ export class McpConnectionManager {
         }
       };
 
+      const isTerminal = (entry: InternalEntry): boolean => {
+        if (entry.status === 'connected' || entry.status === 'needs-auth' || entry.status === 'disabled') {
+          return true;
+        }
+        // A failed entry is only terminal once the retry loop has finished.
+        if (entry.status === 'failed' && entry.retryAbortController === undefined) {
+          return true;
+        }
+        return false;
+      };
+
       const tryResolve = () => {
         if (this.initialLoadAttemptId !== attemptId) {
           cleanup();
@@ -303,13 +327,7 @@ export class McpConnectionManager {
         const entries = Array.from(this.entries.values());
         const configuredCount = entries.length;
         const connectedCount = entries.filter((e) => e.status === 'connected').length;
-        const terminalCount = entries.filter(
-          (e) =>
-            e.status === 'connected' ||
-            e.status === 'failed' ||
-            e.status === 'needs-auth' ||
-            e.status === 'disabled',
-        ).length;
+        const terminalCount = entries.filter(isTerminal).length;
 
         if (configuredCount === 0 || terminalCount === configuredCount) {
           cleanup();
@@ -426,79 +444,88 @@ export class McpConnectionManager {
     const abortController = new AbortController();
     entry.retryAbortController = abortController;
 
-    for (let attemptIndex = 0; attemptIndex <= maxRetries; attemptIndex++) {
-      if (!this.isCurrent(entry, attemptId)) return;
-      entry.retryCount = attemptIndex;
-      entry.nextRetryAt = undefined;
-
-      const needsSemaphore = entry.config.transport === 'stdio';
-      if (needsSemaphore) {
-        // Bail out immediately if the attempt was aborted while we were
-        // waiting for a stdio permit.
-        if (abortController.signal.aborted) return;
-        try {
-          await this.stdioSemaphore.acquire(abortController.signal);
-        } catch {
-          // Aborted while queued for a stdio permit.
-          return;
-        }
-        // The acquire may have resolved after the controller was aborted;
-        // release the permit and return without spawning the child process.
-        if (abortController.signal.aborted) {
-          this.stdioSemaphore.release();
-          return;
-        }
-      }
-
-      try {
-        await this.connectOne(entry, attemptId);
-      } finally {
-        if (needsSemaphore) {
-          this.stdioSemaphore.release();
-        }
-      }
-
-      if (!this.isCurrent(entry, attemptId)) return;
-
-      if (entry.status === 'connected') {
-        entry.retryCount = 0;
+    try {
+      for (let attemptIndex = 0; attemptIndex <= maxRetries; attemptIndex++) {
+        if (!this.isCurrent(entry, attemptId)) return;
+        entry.retryCount = attemptIndex;
         entry.nextRetryAt = undefined;
-        entry.lastError = undefined;
+
+        const needsSemaphore = entry.config.transport === 'stdio';
+        if (needsSemaphore) {
+          // Bail out immediately if the attempt was aborted while we were
+          // waiting for a stdio permit.
+          if (abortController.signal.aborted) return;
+          try {
+            await this.stdioSemaphore.acquire(abortController.signal);
+          } catch {
+            // Aborted while queued for a stdio permit.
+            return;
+          }
+          // The acquire may have resolved after the controller was aborted;
+          // release the permit and return without spawning the child process.
+          if (abortController.signal.aborted) {
+            this.stdioSemaphore.release();
+            return;
+          }
+        }
+
+        try {
+          await this.connectOne(entry, attemptId);
+        } finally {
+          if (needsSemaphore) {
+            this.stdioSemaphore.release();
+          }
+        }
+
+        if (!this.isCurrent(entry, attemptId)) return;
+
+        if (entry.status === 'connected') {
+          entry.retryCount = 0;
+          entry.nextRetryAt = undefined;
+          entry.lastError = undefined;
+          entry.retryAbortController = undefined;
+          return;
+        }
+
+        const error = entry.lastError;
+        if (!isRetryableStartupError(error)) return;
+
+        if (attemptIndex >= maxRetries) return;
+
+        const delayMs = computeRetryDelay(attemptIndex, baseDelayMs);
+        entry.nextRetryAt = Date.now() + delayMs;
+        entry.retryCount = attemptIndex + 1;
+
+        const reason = error instanceof Error ? error.message : String(error);
+        this.log.warn('mcp server retrying connection', {
+          server: entry.name,
+          transport: entry.config.transport,
+          attempt: attemptIndex + 1,
+          maxRetries,
+          nextDelayMs: delayMs,
+          reason,
+        });
+
+        entry.status = 'pending';
+        entry.error = `${entry.name}: retrying connection (attempt ${attemptIndex + 1}/${maxRetries}) in ${delayMs}ms: ${reason}`;
+        this.emit(entry);
+
+        try {
+          await delay(delayMs, abortController.signal);
+        } catch {
+          // Aborted during the delay; drop out silently.
+          return;
+        }
+
+        if (!this.isCurrent(entry, attemptId)) return;
+      }
+    } finally {
+      // Once the retry loop has finished (success, permanent failure, abort,
+      // or replacement), clear the controller so readiness checks can tell the
+      // entry is no longer retrying.
+      if (this.isCurrent(entry, attemptId)) {
         entry.retryAbortController = undefined;
-        return;
       }
-
-      const error = entry.lastError;
-      if (!isRetryableStartupError(error)) return;
-
-      if (attemptIndex >= maxRetries) return;
-
-      const delayMs = computeRetryDelay(attemptIndex, baseDelayMs);
-      entry.nextRetryAt = Date.now() + delayMs;
-      entry.retryCount = attemptIndex + 1;
-
-      const reason = error instanceof Error ? error.message : String(error);
-      this.log.warn('mcp server retrying connection', {
-        server: entry.name,
-        transport: entry.config.transport,
-        attempt: attemptIndex + 1,
-        maxRetries,
-        nextDelayMs: delayMs,
-        reason,
-      });
-
-      entry.status = 'pending';
-      entry.error = `${entry.name}: retrying connection (attempt ${attemptIndex + 1}/${maxRetries}) in ${delayMs}ms: ${reason}`;
-      this.emit(entry);
-
-      try {
-        await delay(delayMs, abortController.signal);
-      } catch {
-        // Aborted during the delay; drop out silently.
-        return;
-      }
-
-      if (!this.isCurrent(entry, attemptId)) return;
     }
   }
 
