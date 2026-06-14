@@ -493,7 +493,12 @@ export class Session {
   private async loadMcpServers(): Promise<void> {
     const servers = this.options.mcpConfig?.servers;
     if (servers === undefined || Object.keys(servers).length === 0) return;
-    await this.mcp.connectAll(servers);
+    // Kick off connections in the background; do not block telemetry on the
+    // full settlement. Errors are routed through emitInitialMcpLoadError.
+    void this.mcp.connectAll(servers).catch((error: unknown) => {
+      this.emitInitialMcpLoadError(error);
+    });
+    await this.mcp.waitForInitialLoad({ readyTimeoutMs: 5_000 });
     const entries = this.mcp.list().filter((entry) => entry.status !== 'disabled');
     const totalCount = entries.length;
     if (totalCount === 0) return;

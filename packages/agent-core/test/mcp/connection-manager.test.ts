@@ -587,6 +587,7 @@ describe('McpConnectionManager', () => {
           args: [stderrThenExitFixture],
           env: { KIMI_TEST_MCP_STDERR: 'fatal: missing API token KIMI_X' },
           startupTimeoutMs: 4_000,
+          maxRetries: 0,
         },
       });
       const entry = cm.get('nope');
@@ -823,7 +824,7 @@ describe('Session MCP startup', () => {
             transport: 'stdio',
             command: process.execPath,
             args: [stdioFixture],
-            env: { KIMI_TEST_MCP_START_DELAY_MS: '250' },
+            env: { KIMI_TEST_MCP_START_DELAY_MS: '1000' },
             startupTimeoutMs: 2_000,
           },
         },
@@ -856,7 +857,7 @@ describe('Session MCP startup', () => {
 
       await Promise.race([
         turnEnded,
-        sleep(1_000).then(() => {
+        sleep(3_000).then(() => {
           throw new Error('Timed out waiting for turn.ended');
         }),
       ]);
