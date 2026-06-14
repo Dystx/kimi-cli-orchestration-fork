@@ -633,7 +633,7 @@ export class McpConnectionManager {
     return entry.attemptId;
   }
 
-  private createClient(config: McpServerConfig, name: string): RuntimeMcpClient {
+  protected createClient(config: McpServerConfig, name: string): RuntimeMcpClient {
     const toolCallTimeoutMs = config.toolTimeoutMs;
     if (config.transport === 'stdio') {
       return new StdioMcpClient(config, { toolCallTimeoutMs });
