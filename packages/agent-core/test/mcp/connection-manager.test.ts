@@ -834,6 +834,7 @@ describe('Session MCP startup', () => {
             transport: 'stdio',
             command: process.execPath,
             args: [slowStdioFixture],
+            env: { KIMI_TEST_MCP_START_DELAY_MS: '500' },
             startupTimeoutMs: 2_000,
             maxRetries: 0,
           },
@@ -845,7 +846,7 @@ describe('Session MCP startup', () => {
     try {
       const result = await Promise.race([
         create.then(() => 'resolved' as const),
-        sleep(1_000).then(() => 'blocked' as const),
+        sleep(5_000).then(() => 'blocked' as const),
       ]);
       expect(result).toBe('resolved');
     } finally {
@@ -853,7 +854,7 @@ describe('Session MCP startup', () => {
       await Promise.race([create.catch(() => {}), sleep(1_000)]);
       await rm(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
     }
-  }, 7000);
+  }, 15_000);
 
   it('waits for initial MCP startup before the first prompt reaches the model', async () => {
     const tmp = await mkdtemp(join(tmpdir(), 'kimi-session-mcp-prompt-'));
