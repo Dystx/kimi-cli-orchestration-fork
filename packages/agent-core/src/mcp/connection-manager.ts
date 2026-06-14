@@ -39,6 +39,14 @@ interface InternalEntry {
 
 export type McpStatusListener = (entry: McpServerEntry) => void;
 
+export interface WaitForInitialLoadOptions {
+  /** Return early after this many milliseconds. */
+  readyTimeoutMs?: number;
+  /** Return early once this many servers are connected. */
+  minReadyCount?: number;
+  signal?: AbortSignal;
+}
+
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_DELAY_MS = 1_000;
@@ -79,7 +87,6 @@ export interface McpConnectionManagerOptions {
 export class McpConnectionManager {
   private readonly entries = new Map<string, InternalEntry>();
   private readonly listeners = new Set<McpStatusListener>();
-  private initialLoad: Promise<void> = Promise.resolve();
   private initialLoadReady: Promise<void> = Promise.resolve();
   private initialLoadSettled: Promise<void> = Promise.resolve();
   private initialLoadAttemptId = 0;
@@ -164,13 +171,25 @@ export class McpConnectionManager {
     const attemptId = ++this.initialLoadAttemptId;
     this.initialLoadStartedAt = Date.now();
     this.initialLoadFinishedAt = undefined;
-    const initialLoad = this.connectAllNow(configs).finally(() => {
+
+    // Start the full settlement process in the background. Callers awaiting
+    // connectAll only wait for the readiness budget.
+    const settled = this.connectAllNow(configs).finally(() => {
       if (this.initialLoadAttemptId === attemptId) {
         this.initialLoadFinishedAt = Date.now();
       }
     });
-    this.initialLoad = initialLoad;
-    return initialLoad;
+    this.initialLoadSettled = settled;
+    this.initialLoadReady = this.createReadyPromise(
+      { readyTimeoutMs: DEFAULT_READY_TIMEOUT_MS },
+      attemptId,
+    );
+
+    // Prevent unhandled rejections if connectAllNow somehow throws before
+    // Promise.allSettled is reached.
+    void settled.catch(() => {});
+
+    return this.initialLoadReady;
   }
 
   async connect(name: string, config: McpServerConfig): Promise<void> {
@@ -208,16 +227,128 @@ export class McpConnectionManager {
     return true;
   }
 
-  waitForInitialLoad(signal?: AbortSignal): Promise<void> {
-    signal?.throwIfAborted();
-    if (signal === undefined) return this.initialLoad;
-    return abortable(this.initialLoad, signal);
+  waitForInitialLoad(): Promise<void>;
+  waitForInitialLoad(signal: AbortSignal): Promise<void>;
+  waitForInitialLoad(options: WaitForInitialLoadOptions): Promise<void>;
+  waitForInitialLoad(signalOrOptions?: AbortSignal | WaitForInitialLoadOptions): Promise<void> {
+    if (signalOrOptions === undefined) {
+      return this.initialLoadSettled;
+    }
+
+    if (signalOrOptions instanceof AbortSignal) {
+      const signal = signalOrOptions;
+      signal.throwIfAborted();
+      return abortable(this.initialLoadSettled, signal);
+    }
+
+    const options = signalOrOptions;
+    options.signal?.throwIfAborted();
+    return this.createReadyPromise(options, this.initialLoadAttemptId);
   }
 
   initialLoadDurationMs(): number {
     if (this.initialLoadStartedAt === undefined) return 0;
     const endedAt = this.initialLoadFinishedAt ?? Date.now();
     return Math.max(0, endedAt - this.initialLoadStartedAt);
+  }
+
+  private createReadyPromise(
+    options: WaitForInitialLoadOptions,
+    attemptId: number,
+  ): Promise<void> {
+    const { readyTimeoutMs = DEFAULT_READY_TIMEOUT_MS, minReadyCount, signal } = options;
+
+    return new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason);
+        return;
+      }
+
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let listener: McpStatusListener | undefined;
+      let onAbort: (() => void) | undefined;
+
+      const cleanup = () => {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+        if (listener !== undefined) {
+          this.listeners.delete(listener);
+          listener = undefined;
+        }
+        if (onAbort !== undefined && signal !== undefined) {
+          signal.removeEventListener('abort', onAbort);
+          onAbort = undefined;
+        }
+      };
+
+      const tryResolve = () => {
+        if (this.initialLoadAttemptId !== attemptId) {
+          cleanup();
+          resolve();
+          return;
+        }
+
+        const entries = Array.from(this.entries.values());
+        const configuredCount = entries.length;
+        const connectedCount = entries.filter((e) => e.status === 'connected').length;
+        const terminalCount = entries.filter(
+          (e) =>
+            e.status === 'connected' ||
+            e.status === 'failed' ||
+            e.status === 'needs-auth' ||
+            e.status === 'disabled',
+        ).length;
+
+        if (configuredCount === 0 || terminalCount === configuredCount) {
+          cleanup();
+          resolve();
+          return;
+        }
+
+        if (minReadyCount !== undefined && connectedCount >= minReadyCount) {
+          cleanup();
+          resolve();
+          return;
+        }
+      };
+
+      timer = setTimeout(() => {
+        cleanup();
+        resolve();
+      }, readyTimeoutMs);
+
+      listener = () => {
+        tryResolve();
+      };
+      this.listeners.add(listener);
+
+      if (signal !== undefined) {
+        onAbort = () => {
+          cleanup();
+          reject(signal.reason);
+        };
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+
+      this.initialLoadSettled.then(
+        () => {
+          cleanup();
+          resolve();
+        },
+        (error) => {
+          cleanup();
+          reject(error);
+        },
+      );
+
+      tryResolve();
+    });
   }
 
   private async connectAllNow(configs: Record<string, McpServerConfig>): Promise<void> {
