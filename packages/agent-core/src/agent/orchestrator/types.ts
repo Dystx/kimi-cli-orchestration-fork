@@ -1,12 +1,18 @@
 import type { PromptOrigin } from '../context/types';
 
 export interface TurnContext {
-  turnId: number;
-  signal: AbortSignal;
+  readonly turnId: number;
+  readonly signal: AbortSignal;
+}
+
+export interface OrchestratorInjection {
+  readonly content: string;
+  readonly origin?: PromptOrigin | undefined;
 }
 
 export interface OrchestratorResult {
-  injections: Array<{ content: string; origin?: PromptOrigin }>;
+  /** System reminders to prepend to the model context for this step. */
+  readonly injections: readonly OrchestratorInjection[];
 }
 
 export interface OrchestrationPolicy {
