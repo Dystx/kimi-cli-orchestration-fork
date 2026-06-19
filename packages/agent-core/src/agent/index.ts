@@ -67,6 +67,7 @@ import type { Kaos } from '@moonshot-ai/kaos';
 import type { ToolServices } from '../tools/support/services';
 import { Orchestrator } from './orchestrator';
 import { PlanTrackingPolicy } from './orchestrator/plan-tracking-policy';
+import { MemoryPolicy } from './orchestrator/memory-policy';
 
 export type { AgentRecord, AgentRecordPersistence } from './records';
 export type { SwarmModeTrigger } from './swarm';
@@ -252,6 +253,7 @@ export class Agent {
     this.tools = new ToolManager(this);
     this.orchestrator = new Orchestrator(this);
     this.orchestrator.registerPolicy(new PlanTrackingPolicy(this));
+    this.orchestrator.registerPolicy(new MemoryPolicy(this));
     this.background = new BackgroundManager(
       this,
       this.homedir === undefined ? undefined : new BackgroundTaskPersistence(this.homedir),

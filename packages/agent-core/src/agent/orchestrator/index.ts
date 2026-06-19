@@ -66,4 +66,34 @@ export class Orchestrator {
       injection.origin ?? ORCHESTRATOR_ORIGIN,
     );
   }
+
+  notifyContextCompacted(): void {
+    for (const policy of this.policies) {
+      try {
+        const hook = (policy as { onContextCompacted?: () => void }).onContextCompacted;
+        if (hook !== undefined) hook.call(policy);
+      } catch (error) {
+        this.agent.log.warn('orchestrator policy failed', {
+          policy: policy.name,
+          phase: 'notifyContextCompacted',
+          error,
+        });
+      }
+    }
+  }
+
+  notifyContextClear(): void {
+    for (const policy of this.policies) {
+      try {
+        const hook = (policy as { onContextClear?: () => void }).onContextClear;
+        if (hook !== undefined) hook.call(policy);
+      } catch (error) {
+        this.agent.log.warn('orchestrator policy failed', {
+          policy: policy.name,
+          phase: 'notifyContextClear',
+          error,
+        });
+      }
+    }
+  }
 }

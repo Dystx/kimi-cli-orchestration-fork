@@ -1,7 +1,6 @@
 import type { Agent } from '..';
 import { GoalInjector } from './goal';
 import type { DynamicInjector } from './injector';
-import { MemoryInjector } from './memory';
 import { OrchestrationSkillInjector } from './orchestration-skills';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
@@ -21,7 +20,6 @@ export class InjectionManager {
   constructor(protected readonly agent: Agent) {
     this.injectors = [
       new PluginSessionStartInjector(agent),
-      new MemoryInjector(agent),
       new TodoListReminderInjector(agent),
       new PlanModeInjector(agent),
       new PlanTrackerInjector(agent),
@@ -50,6 +48,7 @@ export class InjectionManager {
     for (const injector of this.lifecycleInjectors()) {
       injector.onContextClear();
     }
+    this.agent.orchestrator.notifyContextClear();
   }
 
   onContextCompacted(compactedCount: number): void {
@@ -60,6 +59,7 @@ export class InjectionManager {
         continue;
       }
     }
+    this.agent.orchestrator.notifyContextCompacted();
   }
 
   onContextMessageRemoved(index: number): void {
