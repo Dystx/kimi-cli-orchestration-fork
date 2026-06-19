@@ -1,7 +1,6 @@
 import type { Agent } from '..';
 import { GoalInjector } from './goal';
 import type { DynamicInjector } from './injector';
-import { OrchestrationSkillInjector } from './orchestration-skills';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
 import { PlanModeInjector } from './plan-mode';
@@ -24,7 +23,6 @@ export class InjectionManager {
       new PlanModeInjector(agent),
       new PlanTrackerInjector(agent),
       new PermissionModeInjector(agent),
-      ...(agent.type === 'main' && agent.orchestrationHooks ? [new OrchestrationSkillInjector(agent, agent.orchestrationHooks)] : []),
     ];
     this.goalInjector = agent.type === 'main' ? new GoalInjector(agent) : null;
   }
