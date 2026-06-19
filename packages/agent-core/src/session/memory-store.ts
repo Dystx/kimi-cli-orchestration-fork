@@ -1,6 +1,8 @@
-import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'pathe';
+
+import type { MemoryType, MemoryStore as IMemoryStore, WriteMemoryInput } from '../agent/memory/types';
 
 const MAX_ENTRIES = 1000;
 
@@ -16,8 +18,14 @@ export interface MemoryEntry {
   readonly tags: string[];
   readonly content: string;
   readonly source: 'reflection' | 'skill' | 'outcome';
+  readonly type?: MemoryType;
   readonly relevanceScore?: number;
 }
+
+const VALID_TYPES: ReadonlySet<string> = new Set([
+  'fact', 'insight', 'decision', 'preference', 'snippet',
+  'reflection', 'skill', 'outcome',
+]);
 
 interface Bm25Document {
   readonly id: string;
@@ -76,79 +84,75 @@ function tokenize(text: string): string[] {
     .filter((t) => t.length > 1);
 }
 
-export class MemoryStore {
+export class MemoryStore implements IMemoryStore {
   private readonly memoryDir: string;
 
   constructor(baseDir: string) {
     this.memoryDir = join(baseDir, '.kimi-code', 'memory');
   }
 
-  async loadMemories(): Promise<MemoryEntry[]> {
-    try {
-      const files = await readdir(this.memoryDir);
-      const memories: MemoryEntry[] = [];
-      for (const file of files) {
-        if (file !== 'entries.json') continue;
-        const content = await readFile(join(this.memoryDir, file), 'utf-8');
-        try {
-          const parsed = JSON.parse(content) as unknown;
-          if (Array.isArray(parsed)) {
-            for (const entry of parsed) {
-              if (this.isValidMemoryEntry(entry)) {
-                memories.push(entry);
-              }
-            }
-          }
-        } catch {
-          // Skip invalid JSON
-        }
-      }
-      return memories.toSorted((a, b) => b.timestamp - a.timestamp);
-    } catch {
-      return [];
+  async write(entry: WriteMemoryInput): Promise<MemoryEntry> {
+    const memory: MemoryEntry = {
+      id: randomUUID(),
+      timestamp: Date.now(),
+      tags: [...(entry.tags ?? [])],
+      content: entry.content,
+      source: 'reflection',
+      type: entry.type ?? 'fact',
+    };
+
+    await mkdir(this.memoryDir, { recursive: true });
+    const filePath = join(this.memoryDir, 'entries.json');
+
+    const entries = await this.loadAll();
+    entries.push(memory);
+
+    if (entries.length > MAX_ENTRIES) {
+      entries.sort((a, b) => a.timestamp - b.timestamp);
+      entries.splice(0, entries.length - MAX_ENTRIES);
     }
+
+    const tempPath = `${filePath}.tmp`;
+    await writeFile(tempPath, JSON.stringify(entries, null, 2), 'utf-8');
+    await rename(tempPath, filePath);
+    return memory;
   }
 
-  async findRelevant(
-    query: string,
-    tags?: string[],
-    limit = 10,
-    workDirTag?: string,
-  ): Promise<MemoryEntry[]> {
-    const memories = await this.loadMemories();
-    if (memories.length === 0) return [];
+  async read(id: string): Promise<MemoryEntry | undefined> {
+    const entries = await this.loadAll();
+    return entries.find((m) => m.id === id);
+  }
 
+  async search(
+    query: string,
+    options?: { readonly tags?: readonly string[]; readonly limit?: number },
+  ): Promise<MemoryEntry[]> {
+    const limit = options?.limit ?? 10;
+    const tags = options?.tags;
     const queryTerms = tokenize(query);
     const hasQuery = queryTerms.length > 0;
 
-    // Build BM25 documents: content + weighted tags
-    const docs: Bm25Document[] = memories.map((m) => {
+    const entries = await this.loadAll();
+    if (entries.length === 0) return [];
+
+    const docs = entries.map((m) => {
       const terms = tokenize(m.content);
       for (const tag of m.tags) {
         const tagTerms = tokenize(tag);
-        for (let i = 0; i < TAG_WEIGHT; i++) {
-          terms.push(...tagTerms);
-        }
+        for (let i = 0; i < TAG_WEIGHT; i++) terms.push(...tagTerms);
       }
       return { id: m.id, terms, length: terms.length };
     });
-
     const scorer = new Bm25Scorer(docs);
 
-    const scored = memories.map((memory, index) => {
+    const scored = entries.map((memory, index) => {
       const doc = docs[index]!;
-      const tagsLower = new Set(memory.tags.map((t) => t.toLowerCase()));
-
-      // Base relevance via BM25
       let score = hasQuery ? scorer.score(doc, queryTerms) : 0;
-
-      // Exact phrase match adds a strong signal on top of BM25
       const queryLower = query.toLowerCase().trim();
       if (queryLower.length > 0 && memory.content.toLowerCase().includes(queryLower)) {
         score += 3;
       }
-
-      // Explicit tag filter
+      const tagsLower = new Set(memory.tags.map((t) => t.toLowerCase()));
       let tagMatch = false;
       if (tags !== undefined) {
         for (const tag of tags) {
@@ -158,26 +162,12 @@ export class MemoryStore {
           }
         }
       }
-
-      // WorkDir affinity
-      let workDirMatch = false;
-      if (workDirTag !== undefined && tagsLower.has(workDirTag.toLowerCase())) {
-        score += 4;
-        workDirMatch = true;
-      }
-
-      // Without a query, only return memories that have explicit tag/workDir matches
-      if (!hasQuery && !tagMatch && !workDirMatch) {
-        return { memory, score: 0 };
-      }
-
-      // Recency boost (decays over ~5 days)
+      // Without a query, only return memories that have explicit tag matches.
+      // Preserves the original findRelevant gating for backward compatibility.
+      if (!hasQuery && !tagMatch) return { memory, score: 0 };
       const ageDays = (Date.now() - memory.timestamp) / (1000 * 60 * 60 * 24);
       score += Math.max(0, 3 - ageDays * 0.5);
-
-      // Source boost: reflections are highest-value learnings
       if (memory.source === 'reflection') score += 0.5;
-
       return { memory, score };
     });
 
@@ -188,44 +178,36 @@ export class MemoryStore {
       .map(({ memory, score }) => ({ ...memory, relevanceScore: Math.round(score * 100) / 100 }));
   }
 
-  async addMemory(entry: Omit<MemoryEntry, 'id' | 'timestamp'>): Promise<MemoryEntry> {
-    const memory: MemoryEntry = {
-      ...entry,
-      id: randomUUID(),
-      timestamp: Date.now(),
-    };
-
-    await mkdir(this.memoryDir, { recursive: true });
+  async delete(id: string): Promise<boolean> {
+    const entries = await this.loadAll();
+    const next = entries.filter((m) => m.id !== id);
+    if (next.length === entries.length) return false;
     const filePath = join(this.memoryDir, 'entries.json');
-
-    let entries: MemoryEntry[] = [];
-    try {
-      const existing = await readFile(filePath, 'utf-8');
-      const parsed = JSON.parse(existing) as unknown;
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          if (this.isValidMemoryEntry(item)) {
-            entries.push(item);
-          }
-        }
-      }
-    } catch {
-      // File doesn't exist or is invalid
-    }
-
-    entries.push(memory);
-
-    // Enforce size limit: keep most recent entries
-    if (entries.length > MAX_ENTRIES) {
-      entries.sort((a, b) => a.timestamp - b.timestamp);
-      entries = entries.slice(-MAX_ENTRIES);
-    }
-
-    // Atomic write to avoid race conditions
     const tempPath = `${filePath}.tmp`;
-    await writeFile(tempPath, JSON.stringify(entries, null, 2), 'utf-8');
+    await mkdir(this.memoryDir, { recursive: true });
+    await writeFile(tempPath, JSON.stringify(next, null, 2), 'utf-8');
     await rename(tempPath, filePath);
-    return memory;
+    return true;
+  }
+
+  // Backward-compatible helpers.
+  async addMemory(entry: Omit<MemoryEntry, 'id' | 'timestamp'>): Promise<MemoryEntry> {
+    return this.write({ content: entry.content, tags: entry.tags, type: entry.source });
+  }
+
+  async findRelevant(
+    query: string,
+    tags?: string[],
+    limit = 10,
+    workDirTag?: string,
+  ): Promise<MemoryEntry[]> {
+    const tagsWithWorkDir = workDirTag !== undefined ? [...(tags ?? []), workDirTag] : tags;
+    return this.search(query, { tags: tagsWithWorkDir, limit });
+  }
+
+  async loadMemories(): Promise<MemoryEntry[]> {
+    const entries = await this.loadAll();
+    return entries.toSorted((a, b) => b.timestamp - a.timestamp);
   }
 
   formatForInjection(memories: MemoryEntry[]): string {
@@ -244,16 +226,34 @@ export class MemoryStore {
     return lines.join('\n');
   }
 
+  private async loadAll(): Promise<MemoryEntry[]> {
+    const filePath = join(this.memoryDir, 'entries.json');
+    try {
+      const content = await readFile(filePath, 'utf-8');
+      const parsed = JSON.parse(content) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      const result: MemoryEntry[] = [];
+      for (const entry of parsed) {
+        if (this.isValidMemoryEntry(entry)) result.push(entry);
+      }
+      return result;
+    } catch {
+      return [];
+    }
+  }
+
   private isValidMemoryEntry(entry: unknown): entry is MemoryEntry {
     if (typeof entry !== 'object' || entry === null) return false;
     const e = entry as Record<string, unknown>;
+    const typeOk = e['type'] === undefined || VALID_TYPES.has(e['type'] as string);
     return (
       typeof e['id'] === 'string' &&
       typeof e['timestamp'] === 'number' &&
       Array.isArray(e['tags']) &&
       (e['tags'] as unknown[]).every((t: unknown) => typeof t === 'string') &&
       typeof e['content'] === 'string' &&
-      (e['source'] === 'reflection' || e['source'] === 'skill' || e['source'] === 'outcome')
+      (e['source'] === 'reflection' || e['source'] === 'skill' || e['source'] === 'outcome') &&
+      typeOk
     );
   }
 }
