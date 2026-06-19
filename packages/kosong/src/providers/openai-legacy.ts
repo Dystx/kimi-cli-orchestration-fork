@@ -65,6 +65,88 @@ function extractReasoningContent(
   return undefined;
 }
 
+const THINK_OPEN = '<think>';
+const THINK_CLOSE = '</think>';
+
+type ThinkParseState = 'visible' | 'think';
+
+/**
+ * Returns the length of the longest suffix of `buffer` that is also a prefix
+ * of `tag`. Used to hold back a small tail when an XML tag may be split
+ * across stream chunks.
+ */
+function longestTagPrefixSuffix(buffer: string, tag: string): number {
+  const maxLen = Math.min(buffer.length, tag.length - 1);
+  for (let len = maxLen; len > 0; len--) {
+    if (buffer.endsWith(tag.slice(0, len))) {
+      return len;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Incrementally parses raw `<think>...</think>` blocks out of a model's
+ * content stream. Text inside the tags is emitted as reasoning; text outside
+ * is emitted as visible content. Tag boundaries may be split across chunks.
+ */
+class ThinkContentParser {
+  private _state: ThinkParseState = 'visible';
+  private _buffer = '';
+
+  push(text: string): Array<{ type: 'think' | 'text'; content: string }> {
+    this._buffer += text;
+    const emitted: Array<{ type: 'think' | 'text'; content: string }> = [];
+
+    while (true) {
+      if (this._state === 'visible') {
+        const openIndex = this._buffer.indexOf(THINK_OPEN);
+        if (openIndex !== -1) {
+          const before = this._buffer.slice(0, openIndex);
+          if (before.length > 0) {
+            emitted.push({ type: 'text', content: before });
+          }
+          this._buffer = this._buffer.slice(openIndex + THINK_OPEN.length);
+          this._state = 'think';
+          continue;
+        }
+
+        // Hold back only a suffix that could be the start of a `<think>` tag.
+        const keep = longestTagPrefixSuffix(this._buffer, THINK_OPEN);
+        const emitLength = this._buffer.length - keep;
+        if (emitLength > 0) {
+          emitted.push({ type: 'text', content: this._buffer.slice(0, emitLength) });
+          this._buffer = this._buffer.slice(emitLength);
+        }
+        break;
+      } else {
+        const closeIndex = this._buffer.indexOf(THINK_CLOSE);
+        if (closeIndex !== -1) {
+          const reasoning = this._buffer.slice(0, closeIndex);
+          if (reasoning.length > 0) {
+            emitted.push({ type: 'think', content: reasoning });
+          }
+          this._buffer = this._buffer.slice(closeIndex + THINK_CLOSE.length);
+          this._state = 'visible';
+          continue;
+        }
+
+        // Reasoning is incomplete; buffer it until the closing tag arrives.
+        break;
+      }
+    }
+
+    return emitted;
+  }
+
+  flush(): Array<{ type: 'think' | 'text'; content: string }> {
+    if (this._buffer.length === 0) return [];
+    const content = this._buffer;
+    this._buffer = '';
+    return [{ type: this._state === 'visible' ? 'text' : 'think', content }];
+  }
+}
+
 export interface OpenAILegacyOptions {
   apiKey?: string | undefined;
   baseUrl?: string | undefined;
@@ -362,7 +444,21 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
     }
 
     if (message.content) {
-      yield { type: 'text', text: message.content } satisfies StreamedMessagePart;
+      const thinkParser = new ThinkContentParser();
+      for (const part of thinkParser.push(message.content)) {
+        if (part.type === 'think') {
+          yield { type: 'think', think: part.content } satisfies StreamedMessagePart;
+        } else {
+          yield { type: 'text', text: part.content } satisfies StreamedMessagePart;
+        }
+      }
+      for (const part of thinkParser.flush()) {
+        if (part.type === 'think') {
+          yield { type: 'think', think: part.content } satisfies StreamedMessagePart;
+        } else {
+          yield { type: 'text', text: part.content } satisfies StreamedMessagePart;
+        }
+      }
     }
 
     if (message.tool_calls) {
@@ -383,6 +479,7 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
     reasoningKey: string | undefined,
   ): AsyncGenerator<StreamedMessagePart> {
     const bufferedToolCalls = new Map<number | string, BufferedChatCompletionToolCall>();
+    const thinkParser = new ThinkContentParser();
 
     try {
       for await (const chunk of response) {
@@ -416,9 +513,16 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
           yield { type: 'think', think: reasoning } satisfies StreamedMessagePart;
         }
 
-        // text content
+        // text content — also parse inline `<think>` reasoning blocks that some
+        // providers (e.g. MiniMax-M3) embed inside the content string.
         if (delta.content) {
-          yield { type: 'text', text: delta.content } satisfies StreamedMessagePart;
+          for (const part of thinkParser.push(delta.content)) {
+            if (part.type === 'think') {
+              yield { type: 'think', think: part.content } satisfies StreamedMessagePart;
+            } else {
+              yield { type: 'text', text: part.content } satisfies StreamedMessagePart;
+            }
+          }
         }
 
         // tool calls — preserve `index` on every yielded part so the generate
@@ -431,6 +535,14 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
       }
     } catch (error: unknown) {
       throw convertOpenAIError(error);
+    }
+
+    for (const part of thinkParser.flush()) {
+      if (part.type === 'think') {
+        yield { type: 'think', think: part.content } satisfies StreamedMessagePart;
+      } else {
+        yield { type: 'text', text: part.content } satisfies StreamedMessagePart;
+      }
     }
   }
 }

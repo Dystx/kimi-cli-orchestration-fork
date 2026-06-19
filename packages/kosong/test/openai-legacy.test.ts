@@ -1076,6 +1076,99 @@ describe('OpenAILegacyChatProvider', () => {
       ]);
     });
 
+    it('extracts inline <think> blocks from streaming content deltas', async () => {
+      const provider = new OpenAILegacyChatProvider({
+        model: 'MiniMax-M3',
+        apiKey: 'test-key',
+        stream: true,
+      });
+
+      async function* mockedStream(): AsyncIterable<Record<string, unknown>> {
+        yield { id: 'c1', choices: [{ index: 0, delta: { content: '<think>rea' } }] };
+        yield { id: 'c1', choices: [{ index: 0, delta: { content: 'son</think>' } }] };
+        yield { id: 'c1', choices: [{ index: 0, delta: { content: 'visible answer' } }] };
+        yield { id: 'c1', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
+      }
+
+      (provider as any)._client.chat.completions.create = vi
+        .fn()
+        .mockResolvedValue(mockedStream());
+
+      const stream = await provider.generate(
+        '',
+        [],
+        [{ role: 'user', content: [{ type: 'text', text: 'q' }], toolCalls: [] }],
+      );
+      const parts: StreamedMessagePart[] = [];
+      for await (const part of stream) parts.push(part);
+
+      expect(parts).toEqual([
+        { type: 'think', think: 'reason' },
+        { type: 'text', text: 'visible answer' },
+      ]);
+    });
+
+    it('handles <think> tags split across chunk boundaries', async () => {
+      const provider = new OpenAILegacyChatProvider({
+        model: 'MiniMax-M3',
+        apiKey: 'test-key',
+        stream: true,
+      });
+
+      async function* mockedStream(): AsyncIterable<Record<string, unknown>> {
+        yield { id: 'c1', choices: [{ index: 0, delta: { content: '<thi' } }] };
+        yield { id: 'c1', choices: [{ index: 0, delta: { content: 'nk>rea' } }] };
+        yield { id: 'c1', choices: [{ index: 0, delta: { content: 'son</think>ans' } }] };
+        yield { id: 'c1', choices: [{ index: 0, delta: { content: 'wer' } }] };
+        yield { id: 'c1', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
+      }
+
+      (provider as any)._client.chat.completions.create = vi
+        .fn()
+        .mockResolvedValue(mockedStream());
+
+      const stream = await provider.generate(
+        '',
+        [],
+        [{ role: 'user', content: [{ type: 'text', text: 'q' }], toolCalls: [] }],
+      );
+      const parts: StreamedMessagePart[] = [];
+      for await (const part of stream) parts.push(part);
+
+      expect(parts).toEqual([
+        { type: 'think', think: 'reason' },
+        { type: 'text', text: 'ans' },
+        { type: 'text', text: 'wer' },
+      ]);
+    });
+
+    it('treats unclosed <think> tags as reasoning at end of stream', async () => {
+      const provider = new OpenAILegacyChatProvider({
+        model: 'MiniMax-M3',
+        apiKey: 'test-key',
+        stream: true,
+      });
+
+      async function* mockedStream(): AsyncIterable<Record<string, unknown>> {
+        yield { id: 'c1', choices: [{ index: 0, delta: { content: '<think>unfinished' } }] };
+        yield { id: 'c1', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
+      }
+
+      (provider as any)._client.chat.completions.create = vi
+        .fn()
+        .mockResolvedValue(mockedStream());
+
+      const stream = await provider.generate(
+        '',
+        [],
+        [{ role: 'user', content: [{ type: 'text', text: 'q' }], toolCalls: [] }],
+      );
+      const parts: StreamedMessagePart[] = [];
+      for await (const part of stream) parts.push(part);
+
+      expect(parts).toEqual([{ type: 'think', think: 'unfinished' }]);
+    });
+
     it('treats blank reasoning_key as unset so defaults still apply', async () => {
       // ModelAliasSchema accepts `reasoning_key = ""` (z.string().optional()).
       // A blank value must not route reads/writes through an empty property
@@ -1574,6 +1667,63 @@ describe('OpenAILegacyChatProvider — non-stream response parsing', () => {
     );
 
     expect(parts).toEqual([{ type: 'text', text: 'answer' }]);
+  });
+
+  it('extracts inline <think> blocks as ThinkPart in non-stream response', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: false,
+    });
+
+    const parts = await collectFromMockedResponse(
+      provider,
+      makeNonStreamResponse({
+        role: 'assistant',
+        content: '<think>Hidden reasoning</think>Visible answer',
+      }),
+    );
+
+    expect(parts).toEqual([
+      { type: 'think', think: 'Hidden reasoning' },
+      { type: 'text', text: 'Visible answer' },
+    ]);
+  });
+
+  it('treats unclosed <think> tag as reasoning in non-stream response', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: false,
+    });
+
+    const parts = await collectFromMockedResponse(
+      provider,
+      makeNonStreamResponse({
+        role: 'assistant',
+        content: '<think>Hidden reasoning',
+      }),
+    );
+
+    expect(parts).toEqual([{ type: 'think', think: 'Hidden reasoning' }]);
+  });
+
+  it('keeps normal text without <think> tags unchanged in non-stream response', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: false,
+    });
+
+    const parts = await collectFromMockedResponse(
+      provider,
+      makeNonStreamResponse({
+        role: 'assistant',
+        content: 'No reasoning here',
+      }),
+    );
+
+    expect(parts).toEqual([{ type: 'text', text: 'No reasoning here' }]);
   });
 });
 
