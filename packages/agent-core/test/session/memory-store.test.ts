@@ -137,4 +137,24 @@ describe('MemoryStore', () => {
     const results = await store.findRelevant('full test suite', undefined, 2);
     expect(results[0]!.content).toContain('full test suite');
   });
+
+  it('addMemory preserves the caller-provided source', async () => {
+    const store = new MemoryStore(workDir);
+    const entry = await store.addMemory({ content: 'outcome record', tags: [], source: 'outcome' });
+    expect(entry.source).toBe('outcome');
+  });
+
+  it('boosts workDir-tagged memories with +4 (more than regular tag matches)', async () => {
+    const store = new MemoryStore(workDir);
+    // Same content, two memories: one with a regular tag, one with a workDir tag.
+    await store.addMemory({ content: 'project memory', tags: ['unrelated'], source: 'reflection' });
+    await store.addMemory({ content: 'project memory', tags: ['workdir:/tmp/project'], source: 'reflection' });
+
+    // Query that matches both; limit=2 returns both, sorted by score.
+    const results = await store.findRelevant('project', ['unrelated'], 10, 'workdir:/tmp/project');
+    expect(results.length).toBe(2);
+    // The workDir-tagged memory should outrank the regular-tag one (+4 vs +2).
+    expect(results[0]!.tags).toContain('workdir:/tmp/project');
+    expect(results[0]!.relevanceScore).toBeGreaterThan(results[1]!.relevanceScore ?? 0);
+  });
 });

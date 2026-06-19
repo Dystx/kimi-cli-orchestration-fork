@@ -191,8 +191,32 @@ export class MemoryStore implements IMemoryStore {
   }
 
   // Backward-compatible helpers.
+  /**
+   * @deprecated Use {@link write} instead. Preserved for backward compatibility
+   * with `LearningEngine` and existing callers that pass a `source`.
+   */
   async addMemory(entry: Omit<MemoryEntry, 'id' | 'timestamp'>): Promise<MemoryEntry> {
-    return this.write({ content: entry.content, tags: entry.tags, type: entry.source });
+    const memory: MemoryEntry = {
+      ...entry,
+      id: randomUUID(),
+      timestamp: Date.now(),
+    };
+
+    await mkdir(this.memoryDir, { recursive: true });
+    const filePath = join(this.memoryDir, 'entries.json');
+
+    const entries = await this.loadAll();
+    entries.push(memory);
+
+    if (entries.length > MAX_ENTRIES) {
+      entries.sort((a, b) => a.timestamp - b.timestamp);
+      entries.splice(0, entries.length - MAX_ENTRIES);
+    }
+
+    const tempPath = `${filePath}.tmp`;
+    await writeFile(tempPath, JSON.stringify(entries, null, 2), 'utf-8');
+    await rename(tempPath, filePath);
+    return memory;
   }
 
   async findRelevant(
@@ -201,8 +225,7 @@ export class MemoryStore implements IMemoryStore {
     limit = 10,
     workDirTag?: string,
   ): Promise<MemoryEntry[]> {
-    const tagsWithWorkDir = workDirTag !== undefined ? [...(tags ?? []), workDirTag] : tags;
-    return this.search(query, { tags: tagsWithWorkDir, limit });
+    return this.searchWithWorkDirBoost(query, tags, limit, workDirTag);
   }
 
   async loadMemories(): Promise<MemoryEntry[]> {
@@ -224,6 +247,68 @@ export class MemoryStore implements IMemoryStore {
     }
 
     return lines.join('\n');
+  }
+
+  private async searchWithWorkDirBoost(
+    query: string,
+    tags: string[] | undefined,
+    limit: number,
+    workDirTag: string | undefined,
+  ): Promise<MemoryEntry[]> {
+    const queryTerms = tokenize(query);
+    const hasQuery = queryTerms.length > 0;
+
+    const entries = await this.loadAll();
+    if (entries.length === 0) return [];
+
+    const docs = entries.map((m) => {
+      const terms = tokenize(m.content);
+      for (const tag of m.tags) {
+        const tagTerms = tokenize(tag);
+        for (let i = 0; i < TAG_WEIGHT; i++) terms.push(...tagTerms);
+      }
+      return { id: m.id, terms, length: terms.length };
+    });
+    const scorer = new Bm25Scorer(docs);
+
+    const workDirLower = workDirTag?.toLowerCase();
+
+    const scored = entries.map((memory, index) => {
+      const doc = docs[index]!;
+      let score = hasQuery ? scorer.score(doc, queryTerms) : 0;
+      const queryLower = query.toLowerCase().trim();
+      if (queryLower.length > 0 && memory.content.toLowerCase().includes(queryLower)) {
+        score += 3;
+      }
+      const tagsLower = new Set(memory.tags.map((t) => t.toLowerCase()));
+      let tagMatch = false;
+      if (tags !== undefined) {
+        for (const tag of tags) {
+          if (tagsLower.has(tag.toLowerCase())) {
+            score += 2;
+            tagMatch = true;
+          }
+        }
+      }
+      let workDirMatch = false;
+      if (workDirLower !== undefined && tagsLower.has(workDirLower)) {
+        score += 4;
+        workDirMatch = true;
+      }
+      // Without a query, only return memories that have explicit tag or workDir matches.
+      // Preserves the original findRelevant gating for backward compatibility.
+      if (!hasQuery && !tagMatch && !workDirMatch) return { memory, score: 0 };
+      const ageDays = (Date.now() - memory.timestamp) / (1000 * 60 * 60 * 24);
+      score += Math.max(0, 3 - ageDays * 0.5);
+      if (memory.source === 'reflection') score += 0.5;
+      return { memory, score };
+    });
+
+    return scored
+      .filter(({ score }) => score > 0)
+      .toSorted((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map(({ memory, score }) => ({ ...memory, relevanceScore: Math.round(score * 100) / 100 }));
   }
 
   private async loadAll(): Promise<MemoryEntry[]> {
