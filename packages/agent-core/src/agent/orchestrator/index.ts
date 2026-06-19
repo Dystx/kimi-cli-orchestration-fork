@@ -42,7 +42,7 @@ export class Orchestrator {
         if (handler === undefined) {
           continue;
         }
-        const result = await handler(ctx);
+        const result = await handler.call(policy, ctx);
         this.applyInjections(result);
       } catch (error) {
         this.agent.log.warn('orchestrator policy failed', {
