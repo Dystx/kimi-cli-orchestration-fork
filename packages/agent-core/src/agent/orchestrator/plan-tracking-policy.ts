@@ -13,6 +13,7 @@ export class PlanTrackingPolicy implements OrchestrationPolicy {
   private lastSyncedContent: string | null = null;
   private watcher: FSWatcher | null = null;
   private watchedPath: string | null = null;
+  private lastWatchedPath: string | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly agent: Agent) {}
@@ -57,7 +58,14 @@ export class PlanTrackingPolicy implements OrchestrationPolicy {
       this.watcher = watch(path, () => {
         this.debounceSync(path);
       });
+      this.watcher.on('error', (error: unknown) => {
+        this.logError(`watcher error for ${path}`, error);
+      });
       this.watchedPath = path;
+      if (this.lastWatchedPath !== path) {
+        this.lastSyncedContent = null;
+        this.lastWatchedPath = path;
+      }
     } catch (error: unknown) {
       this.logError(`could not watch ${path}`, error);
     }
@@ -69,6 +77,7 @@ export class PlanTrackingPolicy implements OrchestrationPolicy {
       this.watcher = null;
       this.watchedPath = null;
     }
+    this.clearDebounceTimer();
   }
 
   private debounceSync(path: string): void {
@@ -98,6 +107,10 @@ export class PlanTrackingPolicy implements OrchestrationPolicy {
       }
       // Treat any unreadable plan as empty so stale todos are cleared.
       content = '';
+    }
+
+    if (this.agent.planMode.planFilePath !== path) {
+      return;
     }
 
     if (content === this.lastSyncedContent) {

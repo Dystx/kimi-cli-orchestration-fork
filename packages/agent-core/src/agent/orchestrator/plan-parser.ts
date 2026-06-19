@@ -5,8 +5,9 @@ import type { TodoItem } from '#/tools/builtin/state/todo-list';
  *
  * Rules:
  * - The first `#` heading is treated as the plan title and is not emitted.
- * - `##`–`######` headings become todos. Their status is `done` when the
- *   section contains at least one checkbox item; otherwise `pending`.
+ * - `##`–`######` headings become todos. Their status is `done` when every
+ *   checkbox item in the section is checked, `in_progress` when the section has
+ *   at least one unchecked checkbox, and `pending` when there are no items.
  * - `- [x]` / `- [X]` items become `done` todos.
  * - `- [ ]` items become `pending` todos.
  */
@@ -16,18 +17,24 @@ export function parsePlanMarkdown(content: string): TodoItem[] {
 
   let currentHeading: string | null = null;
   let currentSectionHasItems = false;
+  let currentSectionHasUnchecked = false;
   let currentSectionItems: TodoItem[] = [];
 
   const flushHeading = (): void => {
     if (currentHeading !== null && currentHeading.length > 0) {
+      let status: TodoItem['status'] = 'pending';
+      if (currentSectionHasItems) {
+        status = currentSectionHasUnchecked ? 'in_progress' : 'done';
+      }
       todos.push({
         title: currentHeading,
-        status: currentSectionHasItems ? 'done' : 'pending',
+        status,
       });
     }
     todos.push(...currentSectionItems);
     currentHeading = null;
     currentSectionHasItems = false;
+    currentSectionHasUnchecked = false;
     currentSectionItems = [];
   };
 
@@ -46,6 +53,7 @@ export function parsePlanMarkdown(content: string): TodoItem[] {
 
       currentHeading = title;
       currentSectionHasItems = false;
+      currentSectionHasUnchecked = false;
       currentSectionItems = [];
       continue;
     }
@@ -53,11 +61,15 @@ export function parsePlanMarkdown(content: string): TodoItem[] {
     const checkboxMatch = line.match(/^\s*-\s+\[([ xX])\]\s+(.+)$/);
     if (checkboxMatch) {
       const title = checkboxMatch[2]!.trim();
-      const status = checkboxMatch[1]!.toLowerCase() === 'x' ? 'done' : 'pending';
+      const checked = checkboxMatch[1]!.toLowerCase() === 'x';
+      const status = checked ? 'done' : 'pending';
 
       if (title.length > 0) {
         currentSectionItems.push({ title, status });
         currentSectionHasItems = true;
+        if (!checked) {
+          currentSectionHasUnchecked = true;
+        }
       }
 
       continue;

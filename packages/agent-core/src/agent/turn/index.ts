@@ -645,12 +645,12 @@ export class TurnFlow {
               deduper.beginStep();
               return;
             },
-            afterStep: async ({ usage }) => {
+            afterStep: async ({ signal: stepSignal, usage }) => {
               this.agent.usage.record(model, usage, 'turn');
               await this.agent.fullCompaction.afterStep();
               await this.agent.orchestrator.afterStep({
                 turnId: this.currentId ?? -1,
-                signal: new AbortController().signal,
+                signal: stepSignal,
               });
               deduper.endStep();
               return stopForGoalBudget ? { stopTurn: true } : undefined;
