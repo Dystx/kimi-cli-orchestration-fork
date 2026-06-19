@@ -34,7 +34,7 @@ export interface SkillActivationOrigin {
   readonly activationId: string;
   readonly skillName: string;
   readonly skillArgs?: string;
-  readonly trigger: 'user-slash' | 'model-tool' | 'nested-skill';
+  readonly trigger: 'user-slash' | 'model-tool' | 'nested-skill' | 'auto-routed';
   readonly skillType?: string;
   readonly skillPath?: string;
   readonly skillSource?: SkillSource;
@@ -316,7 +316,7 @@ export interface SkillActivatedEvent {
   readonly activationId: string;
   readonly skillName: string;
   readonly skillArgs?: string;
-  readonly trigger: 'user-slash' | 'model-tool' | 'nested-skill';
+  readonly trigger: 'user-slash' | 'model-tool' | 'nested-skill' | 'auto-routed';
   readonly skillPath?: string;
   readonly skillSource?: SkillSource;
 }

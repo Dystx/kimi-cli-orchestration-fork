@@ -14,7 +14,7 @@ export interface SkillActivationOrigin {
   readonly activationId: string;
   readonly skillName: string;
   readonly skillArgs?: string | undefined;
-  readonly trigger: 'user-slash' | 'model-tool' | 'nested-skill';
+  readonly trigger: 'user-slash' | 'model-tool' | 'nested-skill' | 'auto-routed';
   readonly skillType?: string | undefined;
   readonly skillPath?: string | undefined;
   readonly skillSource?: SkillSource | undefined;
