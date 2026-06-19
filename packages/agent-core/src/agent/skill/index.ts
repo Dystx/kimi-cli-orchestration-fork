@@ -15,7 +15,10 @@ export class SkillManager {
     public readonly registry: SkillRegistry,
   ) {}
 
-  activate(input: ActivateSkillPayload): void {
+  activate(
+    input: ActivateSkillPayload,
+    trigger: SkillActivationOrigin['trigger'] = 'user-slash',
+  ): void {
     const skill = this.registry.getSkill(input.name);
     if (skill === undefined) {
       throw new KimiError(ErrorCodes.SKILL_NOT_FOUND, `Skill "${input.name}" was not found`);
@@ -43,7 +46,7 @@ export class SkillManager {
         kind: 'skill_activation',
         activationId: randomUUID(),
         skillName: skill.name,
-        trigger: 'user-slash',
+        trigger,
         skillType: skill.metadata.type,
         skillPath: skill.path,
         skillSource: skill.source,
