@@ -637,6 +637,10 @@ export class TurnFlow {
               this.flushSteerBuffer();
               this.agent.microCompaction.detect();
               await this.agent.fullCompaction.beforeStep(stepSignal);
+              await this.agent.orchestrator.beforeStep({
+                turnId: this.currentId ?? -1,
+                signal: stepSignal,
+              });
               await this.agent.injection.inject();
               deduper.beginStep();
               return;
@@ -644,6 +648,10 @@ export class TurnFlow {
             afterStep: async ({ usage }) => {
               this.agent.usage.record(model, usage, 'turn');
               await this.agent.fullCompaction.afterStep();
+              await this.agent.orchestrator.afterStep({
+                turnId: this.currentId ?? -1,
+                signal: new AbortController().signal,
+              });
               deduper.endStep();
               return stopForGoalBudget ? { stopTurn: true } : undefined;
             },
