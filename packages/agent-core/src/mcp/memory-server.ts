@@ -75,8 +75,10 @@ export async function startMemoryMcpServer(): Promise<void> {
 
 // CLI entrypoint: `node packages/agent-core/dist/mcp/memory-server.js`
 if (import.meta.url === `file://${process.argv[1]}`) {
-  startMemoryMcpServer().catch((error: unknown) => {
+  try {
+    await startMemoryMcpServer();
+  } catch (error: unknown) {
     process.stderr.write(`memory-server failed: ${String(error)}\n`);
     process.exit(1);
-  });
+  }
 }

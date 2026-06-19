@@ -1,4 +1,3 @@
-import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'pathe';
 import type { McpServerConfig } from '../config/schema';
 
@@ -12,7 +11,7 @@ import type { McpServerConfig } from '../config/schema';
  * falls back to the source file so dev workflows still work.
  */
 export function createMemoryMcpServerConfig(): McpServerConfig {
-  const here = dirname(fileURLToPath(import.meta.url));
+  const here = dirname(import.meta.filename);
   // dist: .../dist/mcp/builtin-servers.js → .../dist/mcp/memory-server.js
   const distEntry = join(here, 'memory-server.js');
   return {

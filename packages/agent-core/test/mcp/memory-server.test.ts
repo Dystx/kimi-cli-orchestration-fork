@@ -25,7 +25,7 @@ describe('memory MCP server', () => {
     await client.connect(transport);
     try {
       const list = await client.listTools();
-      const names = list.tools.map((t) => t.name).sort();
+      const names = list.tools.map((t) => t.name).toSorted();
       expect(names).toEqual(['memory_delete', 'memory_read', 'memory_search', 'memory_write']);
     } finally {
       await client.close();
