@@ -417,6 +417,14 @@ export class ToolManager {
         goalToolsEnabled && new b.UpdateGoalTool(this.agent),
         this.agent.rpc?.requestQuestion && new b.AskUserQuestionTool(this.agent),
         new b.TodoListTool(this.toolStore),
+        this.agent.memoryStore &&
+          new b.MemoryWriteTool(this.agent.memoryStore),
+        this.agent.memoryStore &&
+          new b.MemoryReadTool(this.agent.memoryStore),
+        this.agent.memoryStore &&
+          new b.MemorySearchTool(this.agent.memoryStore),
+        this.agent.memoryStore &&
+          new b.MemoryDeleteTool(this.agent.memoryStore),
         new b.TaskListTool(background),
         new b.TaskOutputTool(background),
         new b.TaskStopTool(background),

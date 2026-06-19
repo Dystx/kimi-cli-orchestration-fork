@@ -21,6 +21,10 @@ tools:
   - CronDelete
   - ReadMediaFile
   - TodoList
+  - MemoryWrite
+  - MemoryRead
+  - MemorySearch
+  - MemoryDelete
   - Skill
   - WebSearch
   - Agent
