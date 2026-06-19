@@ -6,7 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { existsSync } from 'node:fs';
 
-const DIST_ENTRY = join(process.cwd(), 'packages/agent-core/dist/mcp/memory-server.js');
+const DIST_ENTRY = join(process.cwd(), 'packages/agent-core/dist/mcp/memory-server.mjs');
 
 describe('memory MCP server', () => {
   let dir: string;
