@@ -65,6 +65,8 @@ import { UsageRecorder } from './usage';
 import { resolveCompletionBudget } from '../utils/completion-budget';
 import type { Kaos } from '@moonshot-ai/kaos';
 import type { ToolServices } from '../tools/support/services';
+import { Orchestrator } from './orchestrator';
+import { PlanTrackingPolicy } from './orchestrator/plan-tracking-policy';
 
 export type { AgentRecord, AgentRecordPersistence } from './records';
 export type { SwarmModeTrigger } from './swarm';
@@ -171,6 +173,7 @@ export class Agent {
   readonly usage: UsageRecorder;
   readonly skills: SkillManager | null;
   readonly tools: ToolManager;
+  readonly orchestrator: Orchestrator;
   readonly background: BackgroundManager;
   readonly cron: CronManager | null;
   readonly goal: GoalMode;
@@ -247,6 +250,8 @@ export class Agent {
     this.usage = new UsageRecorder(this, options.onUsageRecorded);
     this.skills = options.skills ? new SkillManager(this, options.skills) : null;
     this.tools = new ToolManager(this);
+    this.orchestrator = new Orchestrator(this);
+    this.orchestrator.registerPolicy(new PlanTrackingPolicy(this));
     this.background = new BackgroundManager(
       this,
       this.homedir === undefined ? undefined : new BackgroundTaskPersistence(this.homedir),
