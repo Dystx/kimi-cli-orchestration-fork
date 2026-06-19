@@ -68,6 +68,7 @@ import type { ToolServices } from '../tools/support/services';
 import { Orchestrator } from './orchestrator';
 import { PlanTrackingPolicy } from './orchestrator/plan-tracking-policy';
 import { MemoryPolicy } from './orchestrator/memory-policy';
+import { SkillRoutingPolicy } from './orchestrator/skill-routing-policy';
 
 export type { AgentRecord, AgentRecordPersistence } from './records';
 export type { SwarmModeTrigger } from './swarm';
@@ -254,6 +255,7 @@ export class Agent {
     this.orchestrator = new Orchestrator(this);
     this.orchestrator.registerPolicy(new PlanTrackingPolicy(this));
     this.orchestrator.registerPolicy(new MemoryPolicy(this));
+    this.orchestrator.registerPolicy(new SkillRoutingPolicy(this));
     this.background = new BackgroundManager(
       this,
       this.homedir === undefined ? undefined : new BackgroundTaskPersistence(this.homedir),
