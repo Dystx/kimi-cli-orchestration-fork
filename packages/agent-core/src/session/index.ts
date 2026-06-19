@@ -23,7 +23,7 @@ import { SessionLearningEngine } from './learning-engine';
 import { MemoryStore } from './memory-store';
 import { OrchestrationHooks, buildMappingsFromConfig } from './orchestration-hooks';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
-import { parseBooleanEnv, resolveConfigValue, type BackgroundConfig } from '../config';
+import { parseBooleanEnv, resolveConfigValue, type BackgroundConfig, type McpServerConfig } from '../config';
 import { makeErrorPayload } from '../errors';
 import { abortError } from '../utils/abort';
 import {
@@ -32,6 +32,7 @@ import {
   type McpServerEntry,
   type SessionMcpConfig,
 } from '../mcp';
+import { createMemoryMcpServerConfig } from '../mcp/builtin-servers';
 import type { EnabledPluginSessionStart } from '../plugin';
 import {
   DEFAULT_AGENT_PROFILES,
@@ -74,6 +75,13 @@ export interface SessionOptions {
   readonly permissionRules?: readonly PermissionRule[];
   readonly skills?: SessionSkillConfig;
   readonly mcpConfig?: SessionMcpConfig;
+  /**
+   * Auto-register the bundled memory MCP server under the key `memory` when
+   * the user has not already defined a server with that name. The bundled
+   * server shares this package's `MemoryStore`, so external MCP clients
+   * see the same memories the agent itself writes through its builtin tools.
+   */
+  readonly enableMemoryMcpServer?: boolean;
   readonly telemetry?: TelemetryClient | undefined;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
   readonly appVersion?: string;
@@ -600,8 +608,8 @@ export class Session {
   }
 
   private async loadMcpServers(): Promise<void> {
-    const servers = this.options.mcpConfig?.servers;
-    if (servers === undefined || Object.keys(servers).length === 0) return;
+    const servers = this.resolveMcpServers();
+    if (Object.keys(servers).length === 0) return;
     await this.mcp.connectAll(servers);
     const entries = this.mcp.list().filter((entry) => entry.status !== 'disabled');
     const totalCount = entries.length;
@@ -622,6 +630,20 @@ export class Session {
         total_count: totalCount,
       });
     }
+  }
+
+  /**
+   * Returns the effective MCP server map, layering the bundled memory server
+   * on top of any caller-provided `mcpConfig.servers` when
+   * `enableMemoryMcpServer` is true. A caller-defined `memory` entry always
+   * wins so they can override the bundled config (e.g. to point at a custom
+   * memory server implementation or to disable it with `enabled: false`).
+   */
+  private resolveMcpServers(): Record<string, McpServerConfig> {
+    const userServers = this.options.mcpConfig?.servers ?? {};
+    if (this.options.enableMemoryMcpServer !== true) return userServers;
+    if ('memory' in userServers) return userServers;
+    return { ...userServers, memory: createMemoryMcpServerConfig() };
   }
 
   private emitInitialMcpLoadError(error: unknown): void {
