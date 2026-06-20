@@ -20,6 +20,7 @@ import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profi
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionSubagentHost } from '../session/subagent-host';
 import type { OrchestrationContext } from '../session/orchestration-context';
+import type { Session } from '../session';
 import type { SessionCostTracker } from '../session/cost-tracker';
 import type { SubagentResultCache } from '../session/subagent-cache';
 import type { SessionMessageBus } from '../session/message-bus';
@@ -102,6 +103,7 @@ export interface AgentOptions {
   readonly orchestration?: OrchestrationContext;
   readonly onUsageRecorded?: UsageRecordCallback | undefined;
   readonly experimentalFlags?: ExperimentalFlagResolver;
+  readonly session?: Session;
 }
 
 export class Agent {
@@ -128,6 +130,7 @@ export class Agent {
   readonly orchestration?: OrchestrationContext;
   readonly onUsageRecorded?: UsageRecordCallback | undefined;
   readonly experimentalFlags: ExperimentalFlagResolver;
+  readonly session?: Session;
 
   // Orchestration subsystems (populated from orchestration context).
   readonly messageBus?: SessionMessageBus;
@@ -217,6 +220,7 @@ export class Agent {
     this.log = options.log ?? log;
     this.telemetry = options.telemetry ?? noopTelemetryClient;
     this.experimentalFlags = options.experimentalFlags ?? new FlagResolver();
+    this.session = options.session;
 
     this.blobStore = options.homedir
       ? new BlobStore({ blobsDir: join(options.homedir, 'blobs') })

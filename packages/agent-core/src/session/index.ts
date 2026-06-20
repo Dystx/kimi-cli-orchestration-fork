@@ -691,6 +691,7 @@ export class Session {
     return new Agent({
       ...config,
       type,
+      session: this,
       kaos: this.toolKaos.withCwd(cwd),
       toolServices: this.options.toolServices,
       config: this.options.config,
