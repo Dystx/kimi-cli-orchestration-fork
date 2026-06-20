@@ -57,6 +57,7 @@ export class OrchestrationHooks {
   };
   private homedir: string | undefined;
   private _midTurnDrainListeners: Array<() => void> = [];
+  private readonly subscribers = new Map<string, Set<(e: OrchestrationEvent) => void>>();
   private recentOutcomes: SkillOutcomeRecord[] = [];
   private pendingOutcomes: Array<{ skillName: string; eventType: OrchestrationEvent['type'] }> = [];
 
@@ -98,6 +99,23 @@ export class OrchestrationHooks {
     return () => {
       const idx = this._midTurnDrainListeners.indexOf(listener);
       if (idx >= 0) this._midTurnDrainListeners.splice(idx, 1);
+    };
+  }
+
+  /**
+   * Subscribe to orchestration events of a given type. The handler is invoked
+   * synchronously from `emit()` after the event has been deduped and enqueued.
+   * Returns an unsubscribe function.
+   */
+  on(event: string, handler: (e: OrchestrationEvent) => void): () => void {
+    let set = this.subscribers.get(event);
+    if (set === undefined) {
+      set = new Set();
+      this.subscribers.set(event, set);
+    }
+    set.add(handler);
+    return () => {
+      set!.delete(handler);
     };
   }
 
@@ -147,6 +165,18 @@ export class OrchestrationHooks {
     // Notify mid-turn drain listeners
     for (const listener of this._midTurnDrainListeners) {
       try { listener(); } catch {}
+    }
+
+    // Invoke per-event subscribers
+    const subs = this.subscribers.get(event.type);
+    if (subs !== undefined && subs.size > 0) {
+      for (const h of subs) {
+        try {
+          h(event);
+        } catch (error) {
+          console.warn(`OrchestrationHooks subscriber for ${event.type} threw`, error);
+        }
+      }
     }
   }
 
