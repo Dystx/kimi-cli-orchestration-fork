@@ -10,7 +10,7 @@ export type SwarmMemberStatus =
   | 'cancelled';
 
 export interface SwarmMember {
-  readonly subagentId: string;
+  subagentId: string;
   readonly spec: AgentSwarmSpec;
   readonly agentId?: string;
   status: SwarmMemberStatus;
@@ -37,7 +37,15 @@ export class SwarmCoordinator {
 
   constructor(
     runId: string,
-    private readonly agent: { session: { orchestrationHooks: { on(event: string, handler: (e: unknown) => void): () => void } } },
+    private readonly agent: {
+      session: {
+        orchestrationHooks: { on(event: string, handler: (e: unknown) => void): () => void };
+        subagentHost: {
+          spawn(options: unknown): Promise<{ subagentId: string }>;
+        };
+      };
+      log: { warn(msg: string, meta?: unknown): void };
+    },
     private readonly abortController: AbortController,
   ) {
     this.runId = runId;
@@ -135,6 +143,47 @@ export class SwarmCoordinator {
         m.completedAt = now;
       }
     }
+  }
+
+  async retryFailed(): Promise<readonly SubagentResult[]> {
+    if (this.disposed) return [];
+    const failed = Array.from(this.members.values()).filter(
+      (m) => m.status === 'failed' && !this.retried.has(m.subagentId),
+    );
+    if (failed.length === 0) return [];
+
+    const newResults: SubagentResult[] = [];
+    for (const m of failed) {
+      this.retried.add(m.subagentId);
+      try {
+        const handle = await this.agent.session.subagentHost.spawn({
+          spec: m.spec,
+          runInBackground: false,
+        });
+        // Reset member to 'spawned' so the next subagent.* events update it.
+        m.status = 'spawned';
+        m.completedAt = undefined;
+        m.subagentId = handle.subagentId;
+        // The new spawn emits its own subagent.* events; the existing handlers
+        // will update the member when the new subagent reports completion.
+      } catch (error) {
+        this.agent.log.warn('SwarmCoordinator.retryFailed spawn error', {
+          subagentId: m.subagentId,
+          error,
+        });
+        m.status = 'failed';
+        m.result = {
+          task: { kind: 'spawn', spec: m.spec },
+          agentId: m.agentId,
+          status: 'failed',
+          error: error instanceof Error ? error : new Error(String(error)),
+        } as unknown as SubagentResult;
+      }
+    }
+
+    // Best-effort: give the new spawns a chance to settle before returning.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return newResults;
   }
 
   dispose(): void {
