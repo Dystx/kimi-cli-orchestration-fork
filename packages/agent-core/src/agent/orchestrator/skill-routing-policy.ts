@@ -37,6 +37,7 @@ export class SkillRoutingPolicy implements OrchestrationPolicy {
         this.agent.skills.activate({ name: candidate.skill.name, args: '' }, 'auto-routed');
         this.autoActivated.add(candidate.skill.name);
       } catch (error) {
+        this.agent.orchestrator.recordError('skill-routing', error);
         this.agent.log.warn('SkillRoutingPolicy activate failed', {
           skill: candidate.skill.name,
           error,

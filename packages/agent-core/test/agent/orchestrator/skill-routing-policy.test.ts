@@ -33,6 +33,7 @@ function makeAgent(opts: {
     },
     context: { history: opts.history ?? [] },
     log: { warn: vi.fn() },
+    orchestrator: { recordError: vi.fn() } as never,
     config: { cwd: '/tmp' },
   } as never;
 }
