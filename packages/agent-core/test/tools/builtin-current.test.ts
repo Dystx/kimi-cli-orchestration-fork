@@ -154,19 +154,22 @@ function autoCompletingSpawn(
     if (spec !== undefined) {
       setTimeout(() => {
         if (status === 'failed') {
+          // Mirror the real `OrchestrationEvent` shape: the failure
+          // message lives under `payload.error` because
+          // `SessionSubagentHost.emitSubagentFailed` routes the message
+          // through `orchestrationHooks.emit({ type, payload })`.
           session.orchestrationHooks.emit({
             type: 'subagent.failed',
-            subagentId: agentId,
-            error: spec.error ?? 'subagent failed',
+            payload: { subagentId: agentId, error: spec.error ?? 'subagent failed' },
           });
         } else {
-          // The coordinator reads `e.subagentId` first (top-level) before
-          // falling back to `e.payload.subagentId`. Putting the id at the
-          // top level lets a single test stub cover both shapes.
+          // Mirror the real `OrchestrationEvent` shape: the body lives
+          // under `payload.resultSummary`. `getSubagentId` still picks the
+          // id out of `payload.subagentId` so the coordinator sees the
+          // same member it just registered.
           session.orchestrationHooks.emit({
             type: 'subagent.completed',
-            subagentId: agentId,
-            result: spec.result ?? '',
+            payload: { subagentId: agentId, resultSummary: spec.result ?? '' },
           });
         }
       }, 0);
@@ -484,8 +487,8 @@ describe('current builtin collaboration tools', () => {
     expect(result.output).toBe([
       '<agent_swarm_result>',
       '<summary>completed: 2</summary>',
-      '<subagent agent_id="agent-explore-1" item="src/a.ts" outcome="completed"></subagent>',
-      '<subagent agent_id="agent-explore-2" item="src/b.ts" outcome="completed"></subagent>',
+      '<subagent agent_id="agent-explore-1" item="src/a.ts" outcome="completed">explore result a</subagent>',
+      '<subagent agent_id="agent-explore-2" item="src/b.ts" outcome="completed">explore result b</subagent>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
@@ -633,7 +636,7 @@ describe('current builtin collaboration tools', () => {
     expect(result.output).toBe([
       '<agent_swarm_result>',
       '<summary>completed: 1</summary>',
-      '<subagent agent_id="agent-new-3" item="src/new.ts" outcome="completed"></subagent>',
+      '<subagent agent_id="agent-new-3" item="src/new.ts" outcome="completed">result 3</subagent>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
@@ -676,8 +679,8 @@ describe('current builtin collaboration tools', () => {
     expect(result.output).toBe([
       '<agent_swarm_result>',
       '<summary>completed: 2</summary>',
-      '<subagent agent_id="agent-new-a" item="src/new-a.ts" outcome="completed"></subagent>',
-      '<subagent agent_id="agent-new-b" item="src/new-b.ts" outcome="completed"></subagent>',
+      '<subagent agent_id="agent-new-a" item="src/new-a.ts" outcome="completed">result a</subagent>',
+      '<subagent agent_id="agent-new-b" item="src/new-b.ts" outcome="completed">result b</subagent>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
@@ -709,7 +712,7 @@ describe('current builtin collaboration tools', () => {
       '<agent_swarm_result>',
       '<summary>completed: 1, failed: 1</summary>',
       '<resume_hint>Call AgentSwarm with resume_agent_ids using the agent_id values in this result to continue unfinished work.</resume_hint>',
-      '<subagent agent_id="agent-coder-1" item="src/a.ts" outcome="completed"></subagent>',
+      '<subagent agent_id="agent-coder-1" item="src/a.ts" outcome="completed">imports are stable</subagent>',
       '<subagent agent_id="agent-coder-2" item="src/b.ts" outcome="failed">Agent timed out after 30s.</subagent>',
       '</agent_swarm_result>',
     ].join('\n'));
@@ -793,9 +796,9 @@ describe('current builtin collaboration tools', () => {
     expect(result.output).toBe([
       '<agent_swarm_result>',
       '<summary>completed: 3</summary>',
-      '<subagent agent_id="agent-coder-1" item="src/a.ts" outcome="completed"></subagent>',
-      '<subagent agent_id="agent-coder-2" item="src/b.ts" outcome="completed"></subagent>',
-      '<subagent agent_id="agent-coder-3" item="src/c.ts" outcome="completed"></subagent>',
+      '<subagent agent_id="agent-coder-1" item="src/a.ts" outcome="completed">result a</subagent>',
+      '<subagent agent_id="agent-coder-2" item="src/b.ts" outcome="completed">result b</subagent>',
+      '<subagent agent_id="agent-coder-3" item="src/c.ts" outcome="completed">result c</subagent>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();

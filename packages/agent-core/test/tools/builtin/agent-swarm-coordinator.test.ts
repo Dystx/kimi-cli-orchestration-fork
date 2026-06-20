@@ -115,9 +115,13 @@ describe('AgentSwarmTool + SwarmCoordinator lifecycle', () => {
       counter += 1;
       const agentId = `agent-${counter}`;
       setTimeout(() => {
+        // Mirror the real `OrchestrationEvent` shape so the coordinator
+        // reads `resultSummary` from `payload` rather than the
+        // (always-undefined) top-level `result` field. The body content
+        // flows through to the rendered XML via `m.result.result`.
         session.orchestrationHooks.emit('subagent.completed', {
           type: 'subagent.completed',
-          payload: { subagentId: agentId },
+          payload: { subagentId: agentId, resultSummary: 'ok' },
         });
       }, 0);
       return Promise.resolve({

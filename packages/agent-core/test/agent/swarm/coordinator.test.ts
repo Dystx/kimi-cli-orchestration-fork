@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SwarmCoordinator } from '../../../src/agent/swarm/coordinator';
 import type { AgentSwarmSpec } from '../../../src/tools/builtin/collaboration/agent-swarm';
-import type { SubagentResult } from '../../../src/session/subagent-batch';
 
 function spec(name: string): AgentSwarmSpec {
   return { description: name } as unknown as AgentSwarmSpec;
@@ -66,9 +65,12 @@ describe('SwarmCoordinator', () => {
     c.registerMember('b', spec('b'));
     emit(agent.handlers, 'subagent.started', { subagentId: 'a' });
     emit(agent.handlers, 'subagent.started', { subagentId: 'b' });
+    // Mirror the real `OrchestrationEvent` shape emitted by
+    // `SessionSubagentHost` so the coordinator reads `resultSummary` from
+    // `payload` rather than the (always-undefined) top-level `result`.
     emit(agent.handlers, 'subagent.completed', {
-      subagentId: 'a',
-      result: { status: 'completed' } as SubagentResult,
+      type: 'subagent.completed',
+      payload: { subagentId: 'a', resultSummary: 'hello' },
     });
     const p = c.getProgress();
     expect(p.completed).toBe(1);
@@ -80,7 +82,14 @@ describe('SwarmCoordinator', () => {
     const agent = makeAgent();
     const c = newCoordinator(agent);
     c.registerMember('a', spec('a'));
-    emit(agent.handlers, 'subagent.failed', { subagentId: 'a', error: new Error('boom') });
+    // Mirror the real `OrchestrationEvent` shape: `error` lives under
+    // `payload` because `SessionSubagentHost.emitSubagentFailed` routes
+    // the failure message through `orchestrationHooks.emit({ type,
+    // payload })`.
+    emit(agent.handlers, 'subagent.failed', {
+      type: 'subagent.failed',
+      payload: { subagentId: 'a', error: new Error('boom') },
+    });
     const p = c.getProgress();
     expect(p.failed).toBe(1);
     const results = c.getResults();
@@ -122,7 +131,10 @@ describe('SwarmCoordinator', () => {
     const agent = makeAgent();
     const c = newCoordinator(agent);
     c.registerMember('a', spec('a'));
-    emit(agent.handlers, 'subagent.completed', { subagentId: 'a', result: { status: 'completed' } });
+    emit(agent.handlers, 'subagent.completed', {
+      type: 'subagent.completed',
+      payload: { subagentId: 'a', resultSummary: 'done' },
+    });
     const retried = await c.retryFailed();
     expect(retried.length).toBe(0);
     expect(agent.session.subagentHost.spawn).not.toHaveBeenCalled();
@@ -133,7 +145,10 @@ describe('SwarmCoordinator', () => {
     const agent = makeAgent();
     const c = newCoordinator(agent);
     c.registerMember('a', spec('a'));
-    emit(agent.handlers, 'subagent.failed', { subagentId: 'a', error: new Error('boom') });
+    emit(agent.handlers, 'subagent.failed', {
+      type: 'subagent.failed',
+      payload: { subagentId: 'a', error: new Error('boom') },
+    });
     await c.retryFailed();
     expect(agent.session.subagentHost.spawn).toHaveBeenCalledTimes(1);
     // The re-keyed member should be findable under its new id and back in 'spawned'.
@@ -146,7 +161,10 @@ describe('SwarmCoordinator', () => {
   it('ignores events for unknown subagentIds', () => {
     const agent = makeAgent();
     const c = newCoordinator(agent);
-    emit(agent.handlers, 'subagent.completed', { subagentId: 'ghost', result: { status: 'completed' } });
+    emit(agent.handlers, 'subagent.completed', {
+      type: 'subagent.completed',
+      payload: { subagentId: 'ghost', resultSummary: 'done' },
+    });
     const p = c.getProgress();
     expect(p.total).toBe(0);
     c.dispose();

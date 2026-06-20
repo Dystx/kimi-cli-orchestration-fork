@@ -118,10 +118,19 @@ export class SwarmCoordinator {
       if (id === undefined) return;
       const m = this.members.get(id);
       if (m === undefined) return;
-      const result = (e as { result?: SubagentResult }).result;
+      // Production emits `subagent.completed` via `OrchestrationHooks.emit`
+      // with the body nested under `payload.resultSummary`. The legacy flat
+      // shape (`e.result`) is left untouched here because the renderer's
+      // projection already prefers `m.result.result` and ignores `e.result`
+      // — keeping the read off the top level prevents stale test mocks
+      // from masking production fidelity regressions like the empty XML
+      // body bug fixed in this revision.
+      const payload = (e as { payload?: { resultSummary?: unknown } }).payload;
       m.status = 'completed';
       m.completedAt = Date.now();
-      if (result !== undefined) m.result = result;
+      if (payload?.resultSummary !== undefined) {
+        m.result = { result: payload.resultSummary } as unknown as SubagentResult;
+      }
     });
 
     off('subagent.failed', (e) => {
@@ -131,12 +140,21 @@ export class SwarmCoordinator {
       if (m === undefined) return;
       m.status = 'failed';
       m.completedAt = Date.now();
-      const err = (e as { error?: unknown }).error;
+      // The real `OrchestrationEvent` for `subagent.failed` carries the
+      // error message under `payload.error` (a string emitted by
+      // `SessionSubagentHost.emitSubagentFailed`). Fall back to the flat
+      // top-level `error` for older emitters and tests that still use the
+      // legacy `AgentEvent` shape.
+      const payload = (e as { payload?: { error?: unknown } }).payload;
+      const err = payload?.error ?? (e as { error?: unknown }).error;
       m.result = {
         task: { kind: 'spawn', spec: m.spec },
         agentId: m.agentId,
         status: 'failed',
-        error: err instanceof Error ? err : new Error(String(err)),
+        error:
+          err instanceof Error
+            ? err
+            : new Error(typeof err === 'string' ? err : String(err)),
       } as unknown as SubagentResult;
     });
   }

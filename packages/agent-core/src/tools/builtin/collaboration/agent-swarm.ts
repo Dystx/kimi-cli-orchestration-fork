@@ -330,28 +330,32 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
     // Build the final results list from the coordinator's member map rather
     // than `getResults()`. `getResults()` returns whatever `m.result` the
     // coordinator stored — for `subagent.failed` it synthesizes a
-    // `SubagentResult` with `task.spec`; for `subagent.completed` it stores
-    // the event payload's `result` field verbatim, which the current event
-    // shape does not populate as a `SubagentResult`. Iterating the members
-    // directly lets us always reach the typed `m.spec` (needed by the
-    // renderer's `result.spec.kind`/`item` lookups) while still surfacing
-    // the body data that `m.result` carries when available.
+    // `SubagentResult` with `task.spec` and `error`; for `subagent.completed`
+    // it now stores `{ result: payload.resultSummary }` because the real
+    // `OrchestrationEvent` puts the body under `payload`. Iterating the
+    // members directly lets us always reach the typed `m.spec` (needed by
+    // the renderer's `result.spec.kind`/`item` lookups) while still
+    // surfacing the body data that `m.result` carries when available.
     const finalResults = coordinator
       ? coordinator.getProgress().members
           .filter((m) => m.status === 'completed' || m.status === 'failed' || m.status === 'cancelled')
           .map((m) => {
-            const r = m.result as
-              | { result?: unknown; error?: unknown; state?: 'started' | 'not_started'; status?: 'completed' | 'failed' | 'aborted' }
-              | undefined;
-            const errorField = r?.error;
+            // The coordinator stores the completion body as
+            // `{ result: resultSummary }` and the failure body as
+            // `{ error: ... }` (plus a `status: 'failed'` field for the
+            // synthesized failure result). Read each field with an
+            // independent cast so a future change to one shape doesn't
+            // erase the other.
+            const resultField = (m.result as { result?: unknown } | undefined)?.result;
+            const errorField = (m.result as { error?: unknown } | undefined)?.error;
+            const statusField = (m.result as { status?: 'completed' | 'failed' | 'aborted' } | undefined)
+              ?.status;
             const errorMessage =
               errorField instanceof Error
                 ? errorField.message
                 : typeof errorField === 'string'
                   ? errorField
                   : undefined;
-            const resultField = r?.result;
-            const statusField = r?.status;
             const status: 'completed' | 'failed' | 'aborted' =
               statusField ??
               (m.status === 'cancelled'
@@ -363,7 +367,6 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
               spec: m.spec,
               agentId: m.agentId,
               status,
-              state: r?.state,
               result: typeof resultField === 'string' ? resultField : undefined,
               error: errorMessage,
             };
