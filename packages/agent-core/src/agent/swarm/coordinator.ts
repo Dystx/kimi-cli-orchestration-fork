@@ -122,7 +122,21 @@ export class SwarmCoordinator {
     });
   }
 
-  // Tasks 3–5 will fill in cancelAll, retryFailed.
+  // Task 4 will fill in retryFailed.
+  async cancelAll(reason: string): Promise<void> {
+    if (this.disposed) return;
+    this.abortController.abort(reason);
+    // Mark any 'spawned' or 'started' members as cancelled immediately;
+    // 'completed'/'failed'/'suspended' members stay as-is.
+    const now = Date.now();
+    for (const m of this.members.values()) {
+      if (m.status === 'spawned' || m.status === 'started') {
+        m.status = 'cancelled';
+        m.completedAt = now;
+      }
+    }
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
