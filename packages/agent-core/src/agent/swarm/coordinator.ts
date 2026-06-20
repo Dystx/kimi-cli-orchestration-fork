@@ -130,7 +130,6 @@ export class SwarmCoordinator {
     });
   }
 
-  // Task 4 will fill in retryFailed.
   async cancelAll(reason: string): Promise<void> {
     if (this.disposed) return;
     this.abortController.abort(reason);
@@ -160,12 +159,13 @@ export class SwarmCoordinator {
           spec: m.spec,
           runInBackground: false,
         });
-        // Reset member to 'spawned' so the next subagent.* events update it.
+        // Re-key the Map under the new id so subsequent subagent.* events
+        // can find and update this member.
+        this.members.delete(m.subagentId);
+        m.subagentId = handle.subagentId;
         m.status = 'spawned';
         m.completedAt = undefined;
-        m.subagentId = handle.subagentId;
-        // The new spawn emits its own subagent.* events; the existing handlers
-        // will update the member when the new subagent reports completion.
+        this.members.set(m.subagentId, m);
       } catch (error) {
         this.agent.log.warn('SwarmCoordinator.retryFailed spawn error', {
           subagentId: m.subagentId,
