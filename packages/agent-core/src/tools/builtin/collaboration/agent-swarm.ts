@@ -93,7 +93,7 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
   constructor(
     private readonly subagentHost: SessionSubagentHost,
     private readonly swarmMode: SwarmMode,
-    private readonly session: Session,
+    private readonly session: Session | null,
   ) {}
 
   resolveExecution(args: AgentSwarmToolInput): ToolExecution {
@@ -116,81 +116,97 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
     context: ExecutableToolContext,
   ): Promise<ExecutableToolResult> {
     try {
-      this.swarmMode.enter('tool');
       const abortController = new AbortController();
       // SwarmCoordinator expects an `agent`-shaped view of `{ session, log }`;
       // `Session` exposes `orchestrationHooks`, `subagentHost`, and `log` so we
       // adapt it without widening the public surface.
-      const coordinator = new SwarmCoordinator(
-        context.toolCallId,
-        {
-          // SwarmCoordinator's structural type expects `session.subagentHost`
-          // for retry, but Session doesn't expose subagentHost as a typed
-          // field — the AgentSwarmTool already owns a `SessionSubagentHost`
-          // instance so we hand it through.
-          session: {
-            // `OrchestrationHooks` only exposes `emit()` and specialized
-            // listeners; SwarmCoordinator subscribes via `on(event, handler)`
-            // which doesn't exist on the real class. Wrap with a defensive
-            // shim so the coordinator can be constructed regardless of whether
-            // a future revision of OrchestrationHooks gains a generic `on()`.
-            orchestrationHooks: {
-              on: (event: string, handler: (e: unknown) => void): (() => void) => {
-                const hooks = this.session.orchestrationHooks as unknown as {
-                  on?: (event: string, handler: (e: unknown) => void) => unknown;
-                };
-                if (typeof hooks.on === 'function') {
-                  try {
-                    const result = hooks.on(event, handler);
-                    return typeof result === 'function' ? (result as () => void) : () => {};
-                  } catch {
+      //
+      // The coordinator is optional so callers that build an `Agent` without a
+      // `Session` (e.g. test harnesses like `testAgent()`) still get full
+      // swarm execution — `runSwarm` simply skips lifecycle registration when
+      // no coordinator is supplied.
+      const coordinator = this.session
+        ? new SwarmCoordinator(
+            context.toolCallId,
+            {
+              // SwarmCoordinator's structural type expects `session.subagentHost`
+              // for retry, but Session doesn't expose subagentHost as a typed
+              // field — the AgentSwarmTool already owns a `SessionSubagentHost`
+              // instance so we hand it through.
+              session: {
+                // `OrchestrationHooks` only exposes `emit()` and specialized
+                // listeners; SwarmCoordinator subscribes via `on(event, handler)`
+                // which doesn't exist on the real class. Wrap with a defensive
+                // shim so the coordinator can be constructed regardless of whether
+                // a future revision of OrchestrationHooks gains a generic `on()`.
+                orchestrationHooks: {
+                  on: (event: string, handler: (e: unknown) => void): (() => void) => {
+                    const hooks = this.session!.orchestrationHooks as unknown as {
+                      on?: (event: string, handler: (e: unknown) => void) => unknown;
+                    };
+                    if (typeof hooks.on === 'function') {
+                      try {
+                        const result = hooks.on(event, handler);
+                        return typeof result === 'function' ? (result as () => void) : () => {};
+                      } catch {
+                        return () => {};
+                      }
+                    }
                     return () => {};
-                  }
-                }
-                return () => {};
+                  },
+                },
+                // `SessionSubagentHost.spawn` returns `SubagentHandle` (with
+                // `agentId`); the coordinator's structural type expects
+                // `{ subagentId }`. Retry isn't wired in this revision, so we
+                // adapt to the expected shape and tolerate the field rename.
+                subagentHost: {
+                  spawn: (options: unknown) =>
+                    this.subagentHost.spawn(options as Parameters<SessionSubagentHost['spawn']>[0]).then(
+                      (handle) => ({ subagentId: handle.agentId }),
+                    ),
+                },
               },
+              log: this.session.log,
             },
-            // `SessionSubagentHost.spawn` returns `SubagentHandle` (with
-            // `agentId`); the coordinator's structural type expects
-            // `{ subagentId }`. Retry isn't wired in this revision, so we
-            // adapt to the expected shape and tolerate the field rename.
-            subagentHost: {
-              spawn: (options: unknown) =>
-                this.subagentHost.spawn(options as Parameters<SessionSubagentHost['spawn']>[0]).then(
-                  (handle) => ({ subagentId: handle.agentId }),
-                ),
-            },
-          },
-          log: this.session.log,
-        },
-        abortController,
-      );
-      // Bridge the model's signal into the coordinator-owned controller so a
-      // model-side cancellation still propagates into the swarm's subagents
-      // while leaving room for `coordinator.cancelAll()` to abort it
-      // independently.
-      const bridgeAbort = () => {
-        abortController.abort(context.signal.reason);
-      };
-      if (context.signal.aborted) {
-        bridgeAbort();
-      } else {
-        context.signal.addEventListener('abort', bridgeAbort, { once: true });
-      }
+            abortController,
+          )
+        : null;
+      // Pair `swarmMode.enter` and `swarmMode.exit` inside the same try/finally
+      // so an exception from coordinator construction, abort-bridge wiring, or
+      // `runSwarm` cannot leak the active swarm-mode state. The `entered`
+      // guard ensures `exit()` only runs when `enter()` actually succeeded.
+      let entered = false;
       try {
-        const result = await this.runSwarm(
-          args,
-          abortController.signal,
-          context.toolCallId,
-          coordinator,
-        );
-        return {
-          output: result,
+        this.swarmMode.enter('tool');
+        entered = true;
+        // Bridge the model's signal into the coordinator-owned controller so a
+        // model-side cancellation still propagates into the swarm's subagents
+        // while leaving room for `coordinator.cancelAll()` to abort it
+        // independently.
+        const bridgeAbort = () => {
+          abortController.abort(context.signal.reason);
         };
+        if (context.signal.aborted) {
+          bridgeAbort();
+        } else {
+          context.signal.addEventListener('abort', bridgeAbort, { once: true });
+        }
+        try {
+          const result = await this.runSwarm(
+            args,
+            abortController.signal,
+            context.toolCallId,
+            coordinator,
+          );
+          return {
+            output: result,
+          };
+        } finally {
+          context.signal.removeEventListener('abort', bridgeAbort);
+        }
       } finally {
-        context.signal.removeEventListener('abort', bridgeAbort);
-        coordinator.dispose();
-        this.swarmMode.exit();
+        coordinator?.dispose();
+        if (entered) this.swarmMode.exit();
       }
     } catch (error) {
       return {
@@ -204,7 +220,7 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
     args: AgentSwarmToolInput,
     signal: AbortSignal,
     toolCallId: string,
-    coordinator: SwarmCoordinator,
+    coordinator: SwarmCoordinator | null,
   ): Promise<string> {
     const profileName = normalizeOptionalString(args.subagent_type) ?? DEFAULT_SUBAGENT_TYPE;
     const specs = createAgentSwarmSpecs(args, (agentId) => this.subagentHost.getSwarmItem(agentId));
@@ -237,11 +253,14 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
     // Pre-register each spawn task with the coordinator so we can track
     // lifecycle (start/complete/fail). The real `subagentId` is emitted by
     // `subagent.started` events; until then each member keeps the placeholder
-    // `pending-<index>` id and a `spawned` status.
-    for (let index = 0; index < tasks.length; index += 1) {
-      const task = tasks[index]!;
-      if (task.kind === 'spawn') {
-        coordinator.registerMember(`pending-${String(index)}`, task.data);
+    // `pending-<index>` id and a `spawned` status. Skipped when no coordinator
+    // is supplied (e.g. test harnesses without a `Session`).
+    if (coordinator !== null) {
+      for (let index = 0; index < tasks.length; index += 1) {
+        const task = tasks[index]!;
+        if (task.kind === 'spawn') {
+          coordinator.registerMember(`pending-${String(index)}`, task.data);
+        }
       }
     }
     const results = await this.subagentHost.runQueued(tasks);
