@@ -55,7 +55,7 @@ describe('SkillRoutingPolicy integration', () => {
       registry,
     );
 
-    ctx.rpc.prompt({
+    void ctx.rpc.prompt({
       input: [{ type: 'text', text: 'Help me with the database migration' }],
     });
     await ctx.untilTurnEnd();
