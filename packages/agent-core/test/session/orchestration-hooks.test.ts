@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { OrchestrationHooks, type SkillMapping } from '../../src/session/orchestration-hooks';
+import type { OrchestrationEvent } from '../../src/session/orchestration/types';
 import type { SkillDefinition, SkillRegistry } from '../../src/skill';
 
 function makeRegistry(skills: SkillDefinition[]): SkillRegistry {
@@ -362,3 +363,52 @@ describe('OrchestrationHooks', () => {
     });
   });
 });
+
+describe('OrchestrationHooks.on', () => {
+  it('invokes a registered subscriber on matching event', () => {
+    const hooks = new OrchestrationHooks();
+    const handler = vi.fn();
+    hooks.on('subagent.started', handler);
+    hooks.emit({ type: 'subagent.started', payload: { subagentId: 'agent-1' } });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'subagent.started' }),
+    );
+  });
+
+  it('does not invoke subscribers for non-matching events', () => {
+    const hooks = new OrchestrationHooks();
+    const handler = vi.fn();
+    hooks.on('subagent.started', handler);
+    hooks.emit({ type: 'subagent.completed', payload: { subagentId: 'agent-1' } });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('unsubscriber stops future invocations', () => {
+    const hooks = new OrchestrationHooks();
+    const handler = vi.fn();
+    const off = hooks.on('subagent.started', handler);
+    off();
+    hooks.emit({ type: 'subagent.started', payload: { subagentId: 'agent-1' } });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('a throwing subscriber does not break emit', () => {
+    const hooks = new OrchestrationHooks();
+    const throwing = vi.fn(() => {
+      throw new Error('boom');
+    });
+    const after = vi.fn();
+    hooks.on('subagent.started', throwing);
+    hooks.on('subagent.started', after);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      hooks.emit({ type: 'subagent.started', payload: { subagentId: 'agent-1' } });
+    } finally {
+      warnSpy.mockRestore();
+    }
+    expect(throwing).toHaveBeenCalledTimes(1);
+    expect(after).toHaveBeenCalledTimes(1);
+  });
+});
+
