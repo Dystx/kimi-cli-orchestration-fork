@@ -306,19 +306,26 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
       // timeout here is logged and swallowed so one slow subagent cannot
       // block the whole swarm — the next iteration's `waitFor` call will
       // observe the eventual terminal state.
-      await waitFor(
-        () => {
-          const member = coordinator?.getProgress().members.find((x) => x.subagentId === handle.agentId);
-          const status = member?.status;
-          return status === 'completed' || status === 'failed' || status === 'cancelled';
-        },
-        { timeoutMs: 300_000, intervalMs: 100 },
-      ).catch((error) => {
-        this.session?.log.warn('SwarmCoordinator.waitFor terminal state failed', {
-          subagentId: handle.agentId,
-          error,
+      //
+      // Skip the wait entirely when there is no coordinator (e.g. test
+      // harnesses that construct an Agent without a Session); without the
+      // coordinator there are no lifecycle events to observe and waiting
+      // would block the tool call indefinitely.
+      if (coordinator !== null) {
+        await waitFor(
+          () => {
+            const member = coordinator.getProgress().members.find((x) => x.subagentId === handle.agentId);
+            const status = member?.status;
+            return status === 'completed' || status === 'failed' || status === 'cancelled';
+          },
+          { timeoutMs: 300_000, intervalMs: 100 },
+        ).catch((error) => {
+          this.session?.log.warn('SwarmCoordinator.waitFor terminal state failed', {
+            subagentId: handle.agentId,
+            error,
+          });
         });
-      });
+      }
     }
     // Build the final results list from the coordinator's member map rather
     // than `getResults()`. `getResults()` returns whatever `m.result` the
