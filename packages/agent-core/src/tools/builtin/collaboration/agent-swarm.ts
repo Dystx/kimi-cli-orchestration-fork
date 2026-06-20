@@ -18,26 +18,6 @@ const DEFAULT_SUBAGENT_TYPE = 'coder';
 const PROMPT_TEMPLATE_PLACEHOLDER = '{{item}}';
 const MAX_AGENT_SWARM_SUBAGENTS = 128;
 
-// Polls `predicate` every `intervalMs` until it returns truthy or `timeoutMs`
-// has elapsed. Used by `runSwarm` to wait for each sequentially-spawned
-// subagent to reach a terminal coordinator state before moving on. Kept at
-// module scope so both the spawn loop and any future caller can share one
-// implementation.
-function waitFor(
-  predicate: () => boolean,
-  options: { timeoutMs: number; intervalMs: number },
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const tick = () => {
-      if (predicate()) return resolve();
-      if (Date.now() - start > options.timeoutMs) return reject(new Error('waitFor timed out'));
-      setTimeout(tick, options.intervalMs);
-    };
-    tick();
-  });
-}
-
 export const AgentSwarmToolInputSchema = z
   .object({
     description: z
@@ -308,13 +288,16 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
       }
     }
 
-    // Wait for each spawned subagent to reach a terminal state. We poll the
-    // coordinator's `getProgress()` rather than awaiting `handle.completion`
-    // because lifecycle events (start/complete/fail/cancel) flow through the
-    // coordinator and are the authoritative source of truth. A timeout here
-    // is logged and swallowed so one slow subagent cannot block the whole
-    // swarm — the parallel `waitFor` calls all observe the same coordinator
-    // and resolve independently as their corresponding members settle.
+    // Wait for each spawned subagent to reach a terminal state via the
+    // coordinator's event-driven `awaitCompletion`. The coordinator owns the
+    // authoritative lifecycle state for every member and resolves the
+    // returned promise as soon as the corresponding `subagent.completed` /
+    // `subagent.failed` / `subagent.cancelled` event flips the member's
+    // status, so there is no need to poll `getProgress()` from here. A
+    // rejection (including abort-driven rejection from the passed
+    // `AbortSignal`) is logged and swallowed so one failing subagent cannot
+    // block the whole swarm — the parallel `awaitCompletion` calls observe
+    // the same coordinator and settle independently.
     //
     // Skip the wait entirely when there is no coordinator (e.g. test
     // harnesses that construct an Agent without a Session); without the
@@ -323,25 +306,14 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
     if (coordinator !== null) {
       await Promise.all(
         handles.map((handle) =>
-          waitFor(
-            () => {
-              const member = coordinator.getProgress().members.find(
-                (x) => x.subagentId === handle.agentId,
+          coordinator
+            .awaitCompletion(handle.agentId, signal)
+            .catch((error: unknown) => {
+              this.session?.log.warn(
+                'SwarmCoordinator.awaitCompletion failed',
+                { subagentId: handle.agentId, error },
               );
-              const status = member?.status;
-              return (
-                status === 'completed' ||
-                status === 'failed' ||
-                status === 'cancelled'
-              );
-            },
-            { timeoutMs: 300_000, intervalMs: 100 },
-          ).catch((error) => {
-            this.session?.log.warn(
-              'SwarmCoordinator.waitFor terminal state failed',
-              { subagentId: handle.agentId, error },
-            );
-          }),
+            }),
         ),
       );
     }
