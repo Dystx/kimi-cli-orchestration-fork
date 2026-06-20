@@ -12,6 +12,7 @@ import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { collectGitContext } from '../../src/session/git-context';
+import { OrchestrationHooks } from '../../src/session/orchestration/hooks';
 import {
   SessionSubagentHost,
   type QueuedSubagentTask,
@@ -60,6 +61,19 @@ describe('SessionSubagentHost', () => {
         args: expect.objectContaining({
           subagentId: 'agent-0',
           reason: 'Provider rate limit; subagent requeued for retry.',
+        }),
+      }),
+    );
+
+    const hooksQueue = (session.orchestrationHooks as unknown as {
+      queue: ReadonlyArray<{ type: string; payload: Record<string, unknown> }>;
+    }).queue;
+    expect(hooksQueue).toContainEqual(
+      expect.objectContaining({
+        type: 'subagent.suspended',
+        payload: expect.objectContaining({
+          subagentId: 'agent-0',
+          reason: expect.stringContaining('rate limit'),
         }),
       }),
     );
@@ -1473,6 +1487,7 @@ function fakeSession(
   return {
     agents,
     options: { kimiHomeDir: undefined },
+    orchestrationHooks: new OrchestrationHooks(),
     metadata: {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
