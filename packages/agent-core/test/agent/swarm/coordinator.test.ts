@@ -151,4 +151,29 @@ describe('SwarmCoordinator', () => {
     expect(p.total).toBe(0);
     c.dispose();
   });
+
+  it('reads subagentId from OrchestrationEvent.payload shape', () => {
+    const agent = makeAgent();
+    const c = newCoordinator(agent);
+    c.registerMember('agent-1', spec('a'));
+    emit(agent.handlers, 'subagent.started', {
+      type: 'subagent.started',
+      payload: { subagentId: 'agent-1' },
+    });
+    emit(agent.handlers, 'subagent.completed', {
+      type: 'subagent.completed',
+      payload: { subagentId: 'agent-1' },
+    });
+    expect(c.getProgress().completed).toBe(1);
+    c.dispose();
+  });
+
+  it('falls back to top-level subagentId for flat AgentEvent shape', () => {
+    const agent = makeAgent();
+    const c = newCoordinator(agent);
+    c.registerMember('a', spec('a'));
+    emit(agent.handlers, 'subagent.completed', { subagentId: 'a' });
+    expect(c.getProgress().completed).toBe(1);
+    c.dispose();
+  });
 });
