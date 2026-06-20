@@ -123,6 +123,7 @@ export class PlanTrackingPolicy implements OrchestrationPolicy {
   }
 
   private logError(message: string, error: unknown): void {
+    this.agent.orchestrator.recordError('plan-tracking', error);
     const detail = error instanceof Error ? error.message : String(error);
     this.agent.log.warn(`PlanTrackingPolicy ${message}: ${detail}`);
   }

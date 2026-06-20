@@ -44,6 +44,7 @@ function makeMockAgent(overrides: MockAgentOptions = {}): Agent {
       storeData: vi.fn(() => store),
     },
     log: { warn: vi.fn(), error: vi.fn() },
+    orchestrator: { recordError: vi.fn() },
   } as unknown as Agent;
 }
 
