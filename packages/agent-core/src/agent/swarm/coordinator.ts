@@ -44,6 +44,13 @@ export class SwarmCoordinator {
   private readonly members = new Map<string, SwarmMember>();
   private readonly unsubscribers: Array<() => void> = [];
   private retried = new Set<string>();
+  private readonly pendingCompletions = new Map<
+    string,
+    {
+      resolve: (result: SubagentResult | undefined) => void;
+      reject: (error: unknown) => void;
+    }
+  >();
   private disposed = false;
 
   constructor(
@@ -103,6 +110,7 @@ export class SwarmCoordinator {
       if (m === undefined) return;
       m.status = 'started';
       m.startedAt = Date.now();
+      this.resolvePendingCompletions(id);
     });
 
     off('subagent.suspended', (e) => {
@@ -111,6 +119,7 @@ export class SwarmCoordinator {
       const m = this.members.get(id);
       if (m === undefined) return;
       m.status = 'suspended';
+      this.resolvePendingCompletions(id);
     });
 
     off('subagent.completed', (e) => {
@@ -131,6 +140,7 @@ export class SwarmCoordinator {
       if (payload?.resultSummary !== undefined) {
         m.result = { result: payload.resultSummary } as unknown as SubagentResult;
       }
+      this.resolvePendingCompletions(id);
     });
 
     off('subagent.failed', (e) => {
@@ -156,6 +166,7 @@ export class SwarmCoordinator {
             ? err
             : new Error(typeof err === 'string' ? err : String(err)),
       } as unknown as SubagentResult;
+      this.resolvePendingCompletions(id);
     });
   }
 
@@ -170,6 +181,7 @@ export class SwarmCoordinator {
         m.status = 'cancelled';
         m.completedAt = now;
       }
+      this.resolvePendingCompletions(m.subagentId);
     }
   }
 
@@ -216,9 +228,56 @@ export class SwarmCoordinator {
     return [];
   }
 
+  async awaitCompletion(
+    agentId: string,
+    signal?: AbortSignal,
+  ): Promise<SubagentResult | undefined> {
+    const member = this.members.get(agentId);
+    if (member !== undefined && this.isTerminal(member.status)) {
+      return member.result;
+    }
+    if (signal !== undefined && signal.aborted) {
+      throw signal.reason ?? new Error('aborted');
+    }
+    return new Promise<SubagentResult | undefined>((resolve, reject) => {
+      this.pendingCompletions.set(agentId, { resolve, reject });
+      if (signal !== undefined) {
+        const onAbort = () => {
+          const pending = this.pendingCompletions.get(agentId);
+          if (pending !== undefined) {
+            this.pendingCompletions.delete(agentId);
+            pending.reject(signal.reason ?? new Error('aborted'));
+          }
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    });
+  }
+
+  private isTerminal(status: SwarmMemberStatus): boolean {
+    return (
+      status === 'completed' || status === 'failed' || status === 'cancelled'
+    );
+  }
+
+  private resolvePendingCompletions(agentId: string): void {
+    const member = this.members.get(agentId);
+    if (member === undefined) return;
+    if (!this.isTerminal(member.status)) return;
+    const pending = this.pendingCompletions.get(agentId);
+    if (pending !== undefined) {
+      this.pendingCompletions.delete(agentId);
+      pending.resolve(member.result);
+    }
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    for (const [, pending] of this.pendingCompletions) {
+      pending.reject(new Error('SwarmCoordinator disposed'));
+    }
+    this.pendingCompletions.clear();
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
     this.members.clear();

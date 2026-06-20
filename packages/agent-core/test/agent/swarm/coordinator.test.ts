@@ -194,4 +194,51 @@ describe('SwarmCoordinator', () => {
     expect(c.getProgress().completed).toBe(1);
     c.dispose();
   });
+
+  it('awaitCompletion resolves immediately for already-terminal members', async () => {
+    const agent = makeAgent();
+    const c = newCoordinator(agent);
+    c.registerMember('a', spec('a'));
+    emit(agent.handlers, 'subagent.completed', {
+      type: 'subagent.completed',
+      payload: { subagentId: 'a', resultSummary: 'done' },
+    });
+    const result = await c.awaitCompletion('a');
+    expect(result).toBeDefined();
+    c.dispose();
+  });
+
+  it('awaitCompletion resolves when a subagent.completed event arrives later', async () => {
+    const agent = makeAgent();
+    const c = newCoordinator(agent);
+    c.registerMember('a', spec('a'));
+    const promise = c.awaitCompletion('a');
+    emit(agent.handlers, 'subagent.completed', {
+      type: 'subagent.completed',
+      payload: { subagentId: 'a', resultSummary: 'done' },
+    });
+    const result = await promise;
+    expect(result).toBeDefined();
+    c.dispose();
+  });
+
+  it('awaitCompletion rejects on AbortSignal', async () => {
+    const agent = makeAgent();
+    const c = newCoordinator(agent);
+    c.registerMember('a', spec('a'));
+    const controller = new AbortController();
+    const promise = c.awaitCompletion('a', controller.signal);
+    controller.abort('user-requested');
+    await expect(promise).rejects.toBe('user-requested');
+    c.dispose();
+  });
+
+  it('dispose rejects all pending completions', async () => {
+    const agent = makeAgent();
+    const c = newCoordinator(agent);
+    c.registerMember('a', spec('a'));
+    const promise = c.awaitCompletion('a');
+    c.dispose();
+    await expect(promise).rejects.toThrow('SwarmCoordinator disposed');
+  });
 });
