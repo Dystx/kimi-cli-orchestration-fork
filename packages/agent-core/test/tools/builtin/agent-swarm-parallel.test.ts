@@ -87,7 +87,7 @@ describe('AgentSwarmTool parallel dispatch', () => {
     } as never;
 
     const execution = tool.resolveExecution(args);
-    const promise = execution.execute(ctx);
+    const promise = (execution as unknown as { execute: (ctx: never) => Promise<unknown> }).execute(ctx);
 
     // Let all three spawns start. `Promise.all(spawnable.map(spawn))` calls
     // each `spawn` synchronously inside the same microtask, so by the time
