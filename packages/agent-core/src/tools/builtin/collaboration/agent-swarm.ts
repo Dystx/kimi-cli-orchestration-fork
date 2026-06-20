@@ -134,26 +134,13 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
               // field — the AgentSwarmTool already owns a `SessionSubagentHost`
               // instance so we hand it through.
               session: {
-                // `OrchestrationHooks` only exposes `emit()` and specialized
-                // listeners; SwarmCoordinator subscribes via `on(event, handler)`
-                // which doesn't exist on the real class. Wrap with a defensive
-                // shim so the coordinator can be constructed regardless of whether
-                // a future revision of OrchestrationHooks gains a generic `on()`.
-                orchestrationHooks: {
-                  on: (event: string, handler: (e: unknown) => void): (() => void) => {
-                    const hooks = this.session!.orchestrationHooks as unknown as {
-                      on?: (event: string, handler: (e: unknown) => void) => unknown;
-                    };
-                    if (typeof hooks.on === 'function') {
-                      try {
-                        const result = hooks.on(event, handler);
-                        return typeof result === 'function' ? (result as () => void) : () => {};
-                      } catch {
-                        return () => {};
-                      }
-                    }
-                    return () => {};
-                  },
+                // SwarmCoordinator's structural type widens the handler to
+                // `(e: unknown) => void`; the real `OrchestrationHooks.on()`
+                // signature uses `(e: OrchestrationEvent) => void`. Narrow via
+                // an `unknown` cast — the coordinator itself does the same
+                // structural narrowing inside `subscribe()`.
+                orchestrationHooks: this.session.orchestrationHooks as unknown as {
+                  on(event: string, handler: (e: unknown) => void): () => void;
                 },
                 // `SessionSubagentHost.spawn` returns `SubagentHandle` (with
                 // `agentId`); the coordinator's structural type expects
