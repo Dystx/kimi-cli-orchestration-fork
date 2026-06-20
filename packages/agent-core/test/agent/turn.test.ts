@@ -320,18 +320,28 @@ describe('Agent turn flow', () => {
   });
 
   it('enters silent swarm mode when the agent calls AgentSwarm', async () => {
-    const runQueued = vi.fn(async <T>(
-      tasks: readonly QueuedSubagentTask<T>[],
-    ): Promise<Array<QueuedSubagentRunResult<T>>> => {
-      return tasks.map((task, index) => ({
-        task,
-        agentId: `agent-${String(index + 1)}`,
-        status: 'completed' as const,
-        result: `result ${String(index + 1)}`,
-      }));
+    // Phase 5 Task 5: `AgentSwarmTool.runSwarm` calls `subagentHost.spawn(spec)`
+    // per task (sequential) and waits for terminal state via `waitFor` polling
+    // the coordinator. The mock must return a `SubagentHandle` and fire a
+    // `subagent.completed` event through the harness's `orchestrationHooks`
+    // so the polling loop resolves on the first tick.
+    const orchestrationHooks = {
+      on: vi.fn(() => () => undefined),
+      emit: vi.fn(),
+    };
+    const spawn = vi.fn(async (_spec: unknown) => {
+      const agentId = `agent-${String(Math.random()).slice(2, 8)}`;
+      setTimeout(() => {
+        orchestrationHooks.emit({
+          type: 'subagent.completed',
+          payload: { subagentId: agentId, resultSummary: 'ok' },
+        });
+      }, 0);
+      return { agentId };
     });
     const subagentHost = mockSubagentHost({
-      runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
+      spawn: spawn as unknown as SessionSubagentHost['spawn'],
+      ...({ orchestrationHooks } as unknown as { orchestrationHooks: typeof orchestrationHooks }),
     });
     const ctx = testAgent({
       subagentHost,
@@ -355,7 +365,7 @@ describe('Agent turn flow', () => {
       .map((message) => message.origin)
       .filter((origin) => origin?.kind === 'injection');
 
-    expect(runQueued).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledTimes(2);
     expect(enterEvent?.args).toMatchObject({ trigger: 'tool' });
     expect(ctx.agent.swarmMode.isActive).toBe(false);
     // With the bug-fix wiring, `swarmMode.exit()` is paired with `enter()` inside
