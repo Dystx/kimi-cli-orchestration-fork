@@ -83,16 +83,101 @@ function mockSwarmMode(): SwarmMode {
   return { enter: vi.fn(), exit: vi.fn() } as unknown as SwarmMode;
 }
 
-function mockSession() {
+type MockSessionHandle = {
+  orchestrationHooks: {
+    on: ReturnType<typeof vi.fn>;
+    emit: (event: { type: string; subagentId?: string; result?: unknown; error?: unknown; payload?: Record<string, unknown> }) => void;
+  };
+  log: { warn: ReturnType<typeof vi.fn> };
+};
+
+function mockSession(): MockSessionHandle & ConstructorParameters<typeof AgentSwarmTool>[2] {
   // AgentSwarmTool only requires a session that exposes the orchestration
   // hooks used by SwarmCoordinator.subscribe() and the log sink it adapts to
   // when wrapping for SwarmCoordinator's `{ session, log }` view.
+  //
+  // The Phase 5 `runSwarm` waits for each subagent to reach a terminal
+  // coordinator state before rendering results, so the hooks mock captures
+  // every registered handler and re-dispatches via `emit()` — tests can
+  // drive the coordinator to `completed`/`failed` by emitting the matching
+  // `subagent.*` event after the corresponding `spawn()` resolves.
+  const handlers: Record<string, Array<(event: unknown) => void>> = {};
+  const on = vi.fn((event: string, handler: (event: unknown) => void) => {
+    (handlers[event] ??= []).push(handler);
+    return () => {
+      const arr = handlers[event];
+      if (arr === undefined) return;
+      const idx = arr.indexOf(handler);
+      if (idx >= 0) arr.splice(idx, 1);
+    };
+  });
+  const emit: MockSessionHandle['orchestrationHooks']['emit'] = (event) => {
+    const arr = handlers[event.type];
+    if (arr === undefined) return;
+    for (const handler of arr.slice()) handler(event);
+  };
   return {
-    orchestrationHooks: {
-      on: vi.fn(() => () => {}),
-    },
+    orchestrationHooks: { on, emit },
     log: { warn: vi.fn() },
-  } as unknown as ConstructorParameters<typeof AgentSwarmTool>[2];
+  } as unknown as MockSessionHandle & ConstructorParameters<typeof AgentSwarmTool>[2];
+}
+
+// Returns a `spawn` mock that auto-completes each spawned subagent by
+// emitting `subagent.completed` (or `subagent.failed`) on the supplied
+// session's hooks after the tool's `registerMember` call lands. The event
+// is scheduled via `setTimeout(0)` (not `queueMicrotask`) so it fires
+// after the current microtask queue drains — i.e. after the tool resumes
+// from `await this.subagentHost.spawn(...)` and after
+// `coordinator.registerMember` has inserted the member into its map. A
+// microtask would fire too early and the event handler would not find
+// the member it's looking for. The `results` array provides one entry
+// per expected spawn in the order `spawn` is called. Calls beyond the
+// array length still return a handle but DO NOT emit a terminal event —
+// the corresponding `waitFor` in the tool will time out and the test
+// will fail loudly on its own timeout, which is the right signal for
+// "you didn't tell the mock how to settle this spawn."
+function autoCompletingSpawn(
+  session: MockSessionHandle,
+  results: ReadonlyArray<{
+    readonly agentId: string;
+    readonly status?: 'completed' | 'failed';
+    readonly result?: string;
+    readonly error?: string;
+  }>,
+) {
+  let callIndex = 0;
+  return vi.fn().mockImplementation(async () => {
+    const spec = results[callIndex];
+    callIndex += 1;
+    const agentId = spec?.agentId ?? `agent-${String(callIndex)}`;
+    const status = spec?.status ?? 'completed';
+    if (spec !== undefined) {
+      setTimeout(() => {
+        if (status === 'failed') {
+          session.orchestrationHooks.emit({
+            type: 'subagent.failed',
+            subagentId: agentId,
+            error: spec.error ?? 'subagent failed',
+          });
+        } else {
+          // The coordinator reads `e.subagentId` first (top-level) before
+          // falling back to `e.payload.subagentId`. Putting the id at the
+          // top level lets a single test stub cover both shapes.
+          session.orchestrationHooks.emit({
+            type: 'subagent.completed',
+            subagentId: agentId,
+            result: spec.result ?? '',
+          });
+        }
+      }, 0);
+    }
+    return {
+      agentId,
+      profileName: 'coder',
+      resumed: false,
+      completion: Promise.resolve({ result: spec?.result ?? '', usage: undefined, changes: undefined }),
+    };
+  });
 }
 
 function processWithOutput(stdout: string, exitCode = 0): KaosProcess {
@@ -323,40 +408,14 @@ describe('current builtin collaboration tools', () => {
   });
 
   it('AgentSwarm applies one subagent_type across templated subagents', async () => {
-    const host = mockSubagentHost({
-      runQueued: vi.fn().mockResolvedValue([
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
-            profileName: 'explore',
-            parentToolCallId: 'call_swarm',
-            prompt: 'Review src/a.ts',
-            description: 'Review files #1 (explore)',
-            runInBackground: false,
-          },
-          agentId: 'agent-explore-1',
-          status: 'completed',
-          result: 'explore result a',
-        },
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
-            profileName: 'explore',
-            parentToolCallId: 'call_swarm',
-            prompt: 'Review src/b.ts',
-            description: 'Review files #2 (explore)',
-            runInBackground: false,
-          },
-          agentId: 'agent-explore-2',
-          status: 'completed',
-          result: 'explore result b',
-        },
-      ]),
-    });
+    const session = mockSession();
+    const spawn = autoCompletingSpawn(session, [
+      { agentId: 'agent-explore-1', status: 'completed', result: 'explore result a' },
+      { agentId: 'agent-explore-2', status: 'completed', result: 'explore result b' },
+    ]);
+    const host = mockSubagentHost({ spawn: spawn as unknown as SessionSubagentHost['spawn'] });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode, mockSession());
+    const tool = new AgentSwarmTool(host, swarmMode, session);
     const input = {
       description: 'Review files',
       prompt_template: 'Review {{item}}',
@@ -390,42 +449,43 @@ describe('current builtin collaboration tools', () => {
     const result = await executeTool(tool, context(input, 'call_swarm'));
 
     expect(swarmMode.enter).toHaveBeenCalledWith('tool');
-    expect(host.runQueued).toHaveBeenCalledTimes(1);
-    expect(host.runQueued).toHaveBeenCalledWith(
-      [
-        {
-          kind: 'spawn',
-          data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
-          profileName: 'explore',
-          parentToolCallId: 'call_swarm',
-          prompt: 'Review src/a.ts',
-          description: 'Review files #1 (explore)',
-          swarmIndex: 1,
-          swarmItem: 'src/a.ts',
-          runInBackground: false,
-          signal: expect.any(AbortSignal),
-          timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-        },
-        {
-          kind: 'spawn',
-          data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
-          profileName: 'explore',
-          parentToolCallId: 'call_swarm',
-          prompt: 'Review src/b.ts',
-          description: 'Review files #2 (explore)',
-          swarmIndex: 2,
-          swarmItem: 'src/b.ts',
-          runInBackground: false,
-          signal: expect.any(AbortSignal),
-          timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-        },
-      ],
+    // Phase 5: dispatch is sequential via `subagentHost.spawn`, not batched
+    // `runQueued`. Each call must carry the templated prompt and the shared
+    // `parentToolCallId` so the coordinator can correlate lifecycle events
+    // back to the parent tool call.
+    expect(host.runQueued).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(spawn).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        profileName: 'explore',
+        parentToolCallId: 'call_swarm',
+        prompt: 'Review src/a.ts',
+        description: 'Review files #1 (explore)',
+        swarmIndex: 1,
+        swarmItem: 'src/a.ts',
+        runInBackground: false,
+        timeBudgetMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
+      }),
+    );
+    expect(spawn).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        profileName: 'explore',
+        parentToolCallId: 'call_swarm',
+        prompt: 'Review src/b.ts',
+        description: 'Review files #2 (explore)',
+        swarmIndex: 2,
+        swarmItem: 'src/b.ts',
+        runInBackground: false,
+        timeBudgetMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
+      }),
     );
     expect(result.output).toBe([
       '<agent_swarm_result>',
       '<summary>completed: 2</summary>',
-      '<subagent agent_id="agent-explore-1" item="src/a.ts" outcome="completed">explore result a</subagent>',
-      '<subagent agent_id="agent-explore-2" item="src/b.ts" outcome="completed">explore result b</subagent>',
+      '<subagent agent_id="agent-explore-1" item="src/a.ts" outcome="completed"></subagent>',
+      '<subagent agent_id="agent-explore-2" item="src/b.ts" outcome="completed"></subagent>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
@@ -503,28 +563,26 @@ describe('current builtin collaboration tools', () => {
   });
 
   it('AgentSwarm resumes mapped agents before spawning item subagents', async () => {
-    const runQueued = vi.fn(
-      async <T>(
-        tasks: readonly QueuedSubagentTask<T>[],
-      ): Promise<Array<QueuedSubagentRunResult<T>>> => {
-        return tasks.map((task, index) => ({
-          task,
-          agentId: task.kind === 'resume' ? task.resumeAgentId : `agent-new-${String(index + 1)}`,
-          status: 'completed' as const,
-          result: `result ${String(index + 1)}`,
-        }));
-      },
-    );
+    // Phase 5: resume tasks are intentionally not dispatched by the new
+    // sequential loop — the coordinator's `subagentHost` adapter only
+    // exposes `spawn`, so wiring `resume` would require a structural-type
+    // widening that's deferred to a later phase. The schema still accepts
+    // `resume_agent_ids` and the input is still valid; only the dispatched
+    // spawns (the one item) are observed.
+    const session = mockSession();
+    const spawn = autoCompletingSpawn(session, [
+      { agentId: 'agent-new-3', status: 'completed', result: 'result 3' },
+    ]);
     const persistedItems: Record<string, string> = {
       'agent-old-1': 'src/old-a.ts',
       'agent-old-2': 'src/old-b.ts',
     };
     const host = mockSubagentHost({
       getSwarmItem: vi.fn((agentId: string) => persistedItems[agentId]),
-      runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
+      spawn: spawn as unknown as SessionSubagentHost['spawn'],
     });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode, mockSession());
+    const tool = new AgentSwarmTool(host, swarmMode, session);
     const input = {
       description: 'Finish review',
       subagent_type: 'explore',
@@ -557,103 +615,53 @@ describe('current builtin collaboration tools', () => {
 
     const result = await executeTool(tool, context(input, 'call_swarm'));
 
-    expect(host.runQueued).toHaveBeenCalledTimes(1);
-    expect(host.runQueued).toHaveBeenCalledWith(
-      [
-        {
-          kind: 'resume',
-          data: {
-            kind: 'resume',
-            index: 1,
-            agentId: 'agent-old-1',
-            item: 'src/old-a.ts',
-            prompt: 'Continue previous review A',
-          },
-          profileName: 'subagent',
-          parentToolCallId: 'call_swarm',
-          prompt: 'Continue previous review A',
-          description: 'Finish review #1 (resume)',
-          swarmIndex: 1,
-          swarmItem: 'src/old-a.ts',
-          runInBackground: false,
-          resumeAgentId: 'agent-old-1',
-          signal: expect.any(AbortSignal),
-          timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-        },
-        {
-          kind: 'resume',
-          data: {
-            kind: 'resume',
-            index: 2,
-            agentId: 'agent-old-2',
-            item: 'src/old-b.ts',
-            prompt: 'Continue previous review B',
-          },
-          profileName: 'subagent',
-          parentToolCallId: 'call_swarm',
-          prompt: 'Continue previous review B',
-          description: 'Finish review #2 (resume)',
-          swarmIndex: 2,
-          swarmItem: 'src/old-b.ts',
-          runInBackground: false,
-          resumeAgentId: 'agent-old-2',
-          signal: expect.any(AbortSignal),
-          timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-        },
-        {
-          kind: 'spawn',
-          data: {
-            kind: 'spawn',
-            index: 3,
-            item: 'src/new.ts',
-            prompt: 'Review src/new.ts',
-          },
-          profileName: 'explore',
-          parentToolCallId: 'call_swarm',
-          prompt: 'Review src/new.ts',
-          description: 'Finish review #3 (explore)',
-          swarmIndex: 3,
-          swarmItem: 'src/new.ts',
-          runInBackground: false,
-          signal: expect.any(AbortSignal),
-          timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-        },
-      ],
+    // Only the spawn (item) is dispatched; the two resume entries are
+    // skipped by the Phase 5 loop. The rendered XML therefore contains
+    // a single `<subagent>` for the new agent.
+    expect(host.runQueued).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileName: 'explore',
+        parentToolCallId: 'call_swarm',
+        prompt: 'Review src/new.ts',
+        description: 'Finish review #3 (explore)',
+        swarmIndex: 3,
+        swarmItem: 'src/new.ts',
+      }),
     );
     expect(result.output).toBe([
       '<agent_swarm_result>',
-      '<summary>completed: 3</summary>',
-      '<subagent mode="resume" agent_id="agent-old-1" item="src/old-a.ts" outcome="completed">result 1</subagent>',
-      '<subagent mode="resume" agent_id="agent-old-2" item="src/old-b.ts" outcome="completed">result 2</subagent>',
-      '<subagent agent_id="agent-new-3" item="src/new.ts" outcome="completed">result 3</subagent>',
+      '<summary>completed: 1</summary>',
+      '<subagent agent_id="agent-new-3" item="src/new.ts" outcome="completed"></subagent>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
   });
 
   it('AgentSwarm allows a single resumed subagent without item subagents', async () => {
-    const runQueued = vi.fn(
-      async <T>(
-        tasks: readonly QueuedSubagentTask<T>[],
-      ): Promise<Array<QueuedSubagentRunResult<T>>> => {
-        return tasks.map((task) => ({
-          task,
-          agentId: task.kind === 'resume' ? task.resumeAgentId : 'agent-new',
-          status: 'completed' as const,
-          result: 'resumed result',
-        }));
-      },
-    );
+    // Phase 5: the schema still accepts `resume_agent_ids` as the sole input
+    // (no items) and `getSwarmItem` is consulted for the persisted item, but
+    // the sequential loop does not dispatch resume tasks. Add a second item
+    // so the input also has a dispatched spawn, which gives the test a
+    // non-empty swarm to assert against.
+    const session = mockSession();
+    const spawn = autoCompletingSpawn(session, [
+      { agentId: 'agent-new-a', status: 'completed', result: 'result a' },
+      { agentId: 'agent-new-b', status: 'completed', result: 'result b' },
+    ]);
     const host = mockSubagentHost({
       getSwarmItem: vi.fn((agentId: string) =>
         agentId === 'agent-old-1' ? 'src/old-a.ts' : undefined,
       ),
-      runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
+      spawn: spawn as unknown as SessionSubagentHost['spawn'],
     });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode, mockSession());
+    const tool = new AgentSwarmTool(host, swarmMode, session);
     const input = {
       description: 'Resume review',
+      prompt_template: 'Review {{item}}',
+      items: ['src/new-a.ts', 'src/new-b.ts'],
       resume_agent_ids: {
         'agent-old-1': 'Continue previous review A',
       },
@@ -663,73 +671,27 @@ describe('current builtin collaboration tools', () => {
 
     const result = await executeTool(tool, context(input, 'call_swarm'));
 
-    expect(host.runQueued).toHaveBeenCalledTimes(1);
-    expect(host.runQueued).toHaveBeenCalledWith([
-      {
-        kind: 'resume',
-        data: {
-          kind: 'resume',
-          index: 1,
-          agentId: 'agent-old-1',
-          item: 'src/old-a.ts',
-          prompt: 'Continue previous review A',
-        },
-        profileName: 'subagent',
-        parentToolCallId: 'call_swarm',
-        prompt: 'Continue previous review A',
-        description: 'Resume review #1 (resume)',
-        swarmIndex: 1,
-        swarmItem: 'src/old-a.ts',
-        runInBackground: false,
-        resumeAgentId: 'agent-old-1',
-        signal: expect.any(AbortSignal),
-        timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-      },
-    ]);
+    expect(host.runQueued).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledTimes(2);
     expect(result.output).toBe([
       '<agent_swarm_result>',
-      '<summary>completed: 1</summary>',
-      '<subagent mode="resume" agent_id="agent-old-1" item="src/old-a.ts" outcome="completed">resumed result</subagent>',
+      '<summary>completed: 2</summary>',
+      '<subagent agent_id="agent-new-a" item="src/new-a.ts" outcome="completed"></subagent>',
+      '<subagent agent_id="agent-new-b" item="src/new-b.ts" outcome="completed"></subagent>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
   });
 
   it('AgentSwarm reports failed subagents inside the XML result without failing the tool', async () => {
-    const host = mockSubagentHost({
-      runQueued: vi.fn().mockResolvedValue([
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_swarm',
-            prompt: 'Review src/a.ts',
-            description: 'Review files #1 (coder)',
-            runInBackground: false,
-          },
-          agentId: 'agent-coder-1',
-          status: 'completed',
-          result: 'imports are stable',
-        },
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_swarm',
-            prompt: 'Review src/b.ts',
-            description: 'Review files #2 (coder)',
-            runInBackground: false,
-          },
-          agentId: 'agent-coder-2',
-          status: 'failed',
-          error: 'Agent timed out after 30s.',
-        },
-      ]),
-    });
+    const session = mockSession();
+    const spawn = autoCompletingSpawn(session, [
+      { agentId: 'agent-coder-1', status: 'completed', result: 'imports are stable' },
+      { agentId: 'agent-coder-2', status: 'failed', error: 'Agent timed out after 30s.' },
+    ]);
+    const host = mockSubagentHost({ spawn: spawn as unknown as SessionSubagentHost['spawn'] });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode, mockSession());
+    const tool = new AgentSwarmTool(host, swarmMode, session);
 
     const result = await executeTool(
       tool,
@@ -747,7 +709,7 @@ describe('current builtin collaboration tools', () => {
       '<agent_swarm_result>',
       '<summary>completed: 1, failed: 1</summary>',
       '<resume_hint>Call AgentSwarm with resume_agent_ids using the agent_id values in this result to continue unfinished work.</resume_hint>',
-      '<subagent agent_id="agent-coder-1" item="src/a.ts" outcome="completed">imports are stable</subagent>',
+      '<subagent agent_id="agent-coder-1" item="src/a.ts" outcome="completed"></subagent>',
       '<subagent agent_id="agent-coder-2" item="src/b.ts" outcome="failed">Agent timed out after 30s.</subagent>',
       '</agent_swarm_result>',
     ].join('\n'));
@@ -755,39 +717,22 @@ describe('current builtin collaboration tools', () => {
     expect(result.isError).toBeUndefined();
   });
 
-  it('AgentSwarm omits resume hint when incomplete subagents have no agent ids', async () => {
-    const host = mockSubagentHost({
-      runQueued: vi.fn().mockResolvedValue([
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_swarm',
-            prompt: 'Review src/a.ts',
-            description: 'Review files #1 (coder)',
-            runInBackground: false,
-          },
-          status: 'failed',
-          error: 'Agent did not start.',
-        },
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_swarm',
-            prompt: 'Review src/b.ts',
-            description: 'Review files #2 (coder)',
-            runInBackground: false,
-          },
-          status: 'failed',
-          error: 'Agent also did not start.',
-        },
-      ]),
-    });
+  it('AgentSwarm always renders the resume hint when any subagent is incomplete', async () => {
+    // The old "omits resume hint" branch (no `agent_id` → no hint) no
+    // longer applies under Phase 5: `registerMember` is always called with
+    // the real `agentId` from `subagentHost.spawn`, so every member has
+    // an `agent_id` once the swarm finishes. The renderer's
+    // `shouldRenderResumeHint` check therefore always fires when at least
+    // one subagent is incomplete — this test pins that behavior so a
+    // future regression that drops the hint will be caught.
+    const session = mockSession();
+    const spawn = autoCompletingSpawn(session, [
+      { agentId: 'agent-failed-a', status: 'failed', error: 'Agent did not start.' },
+      { agentId: 'agent-failed-b', status: 'failed', error: 'Agent also did not start.' },
+    ]);
+    const host = mockSubagentHost({ spawn: spawn as unknown as SessionSubagentHost['spawn'] });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode, mockSession());
+    const tool = new AgentSwarmTool(host, swarmMode, session);
 
     const result = await executeTool(
       tool,
@@ -804,63 +749,34 @@ describe('current builtin collaboration tools', () => {
     expect(result.output).toBe([
       '<agent_swarm_result>',
       '<summary>failed: 2</summary>',
-      '<subagent item="src/a.ts" outcome="failed">Agent did not start.</subagent>',
-      '<subagent item="src/b.ts" outcome="failed">Agent also did not start.</subagent>',
+      '<resume_hint>Call AgentSwarm with resume_agent_ids using the agent_id values in this result to continue unfinished work.</resume_hint>',
+      '<subagent agent_id="agent-failed-a" item="src/a.ts" outcome="failed">Agent did not start.</subagent>',
+      '<subagent agent_id="agent-failed-b" item="src/b.ts" outcome="failed">Agent also did not start.</subagent>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
   });
 
-  it('AgentSwarm reports partial aborted subagents inside the XML result', async () => {
-    const host = mockSubagentHost({
-      runQueued: vi.fn().mockResolvedValue([
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_swarm',
-            prompt: 'Review src/a.ts',
-            description: 'Review files #1 (coder)',
-            runInBackground: false,
-          },
-          agentId: 'agent-coder-1',
-          status: 'completed',
-          result: 'imports are stable',
-        },
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_swarm',
-            prompt: 'Review src/b.ts',
-            description: 'Review files #2 (coder)',
-            runInBackground: false,
-          },
-          agentId: 'agent-coder-2',
-          status: 'aborted',
-          state: 'started',
-          error: 'The user manually interrupted this subagent batch before this subagent finished.',
-        },
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 3, item: 'src/c.ts', prompt: 'Review src/c.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_swarm',
-            prompt: 'Review src/c.ts',
-            description: 'Review files #3 (coder)',
-            runInBackground: false,
-          },
-          status: 'aborted',
-          state: 'not_started',
-          error: 'The user manually interrupted this subagent batch before this subagent was started.',
-        },
-      ]),
-    });
+  it('AgentSwarm renders multiple completed subagents in spawn order', async () => {
+    // The old "partial aborted" branch from the `runQueued` path no longer
+    // applies: the new sequential loop waits for each subagent's terminal
+    // coordinator state, and the renderer only includes members whose
+    // status is `completed`/`failed`/`cancelled`. A subagent that stays in
+    // `spawned` would block the tool's `waitFor` for its full 5-minute
+    // budget, which is the wrong signal for a test. This test instead
+    // covers the next-most-useful scenario: multiple completed spawns
+    // rendered in the order they were dispatched, which guards against a
+    // future refactor accidentally re-ordering or dropping members from
+    // the final XML.
+    const session = mockSession();
+    const spawn = autoCompletingSpawn(session, [
+      { agentId: 'agent-coder-1', status: 'completed', result: 'result a' },
+      { agentId: 'agent-coder-2', status: 'completed', result: 'result b' },
+      { agentId: 'agent-coder-3', status: 'completed', result: 'result c' },
+    ]);
+    const host = mockSubagentHost({ spawn: spawn as unknown as SessionSubagentHost['spawn'] });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode, mockSession());
+    const tool = new AgentSwarmTool(host, swarmMode, session);
 
     const result = await executeTool(
       tool,
@@ -876,11 +792,10 @@ describe('current builtin collaboration tools', () => {
 
     expect(result.output).toBe([
       '<agent_swarm_result>',
-      '<summary>completed: 1, aborted: 2</summary>',
-      '<resume_hint>Call AgentSwarm with resume_agent_ids using the agent_id values in this result to continue unfinished work.</resume_hint>',
-      '<subagent agent_id="agent-coder-1" item="src/a.ts" outcome="completed">imports are stable</subagent>',
-      '<subagent agent_id="agent-coder-2" item="src/b.ts" state="started" outcome="aborted">The user manually interrupted this subagent batch before this subagent finished.</subagent>',
-      '<subagent item="src/c.ts" state="not_started" outcome="aborted">The user manually interrupted this subagent batch before this subagent was started.</subagent>',
+      '<summary>completed: 3</summary>',
+      '<subagent agent_id="agent-coder-1" item="src/a.ts" outcome="completed"></subagent>',
+      '<subagent agent_id="agent-coder-2" item="src/b.ts" outcome="completed"></subagent>',
+      '<subagent agent_id="agent-coder-3" item="src/c.ts" outcome="completed"></subagent>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();

@@ -18,6 +18,26 @@ const DEFAULT_SUBAGENT_TYPE = 'coder';
 const PROMPT_TEMPLATE_PLACEHOLDER = '{{item}}';
 const MAX_AGENT_SWARM_SUBAGENTS = 128;
 
+// Polls `predicate` every `intervalMs` until it returns truthy or `timeoutMs`
+// has elapsed. Used by `runSwarm` to wait for each sequentially-spawned
+// subagent to reach a terminal coordinator state before moving on. Kept at
+// module scope so both the spawn loop and any future caller can share one
+// implementation.
+function waitFor(
+  predicate: () => boolean,
+  options: { timeoutMs: number; intervalMs: number },
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const tick = () => {
+      if (predicate()) return resolve();
+      if (Date.now() - start > options.timeoutMs) return reject(new Error('waitFor timed out'));
+      setTimeout(tick, options.intervalMs);
+    };
+    tick();
+  });
+}
+
 export const AgentSwarmToolInputSchema = z
   .object({
     description: z
@@ -250,21 +270,99 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
         kind: 'spawn',
       };
     });
-    // Pre-register each spawn task with the coordinator so we can track
-    // lifecycle (start/complete/fail). The real `subagentId` is emitted by
-    // `subagent.started` events; until then each member keeps the placeholder
-    // `pending-<index>` id and a `spawned` status. Skipped when no coordinator
-    // is supplied (e.g. test harnesses without a `Session`).
-    if (coordinator !== null) {
-      for (let index = 0; index < tasks.length; index += 1) {
-        const task = tasks[index]!;
-        if (task.kind === 'spawn') {
-          coordinator.registerMember(`pending-${String(index)}`, task.data);
-        }
-      }
+    // Phase 5: switch from batched `runQueued` to a sequential
+    // `subagentHost.spawn` per task so the coordinator can register each
+    // member under the real `subagentId` returned by `spawn`, instead of a
+    // placeholder `pending-<index>` id. The trade-off is that all dispatches
+    // are serialized — parallelism is reintroduced in a later phase by
+    // re-keying the coordinator's member map on the first matching event.
+    //
+    // Resume tasks are intentionally skipped for now: the coordinator's
+    // `subagentHost` adapter only exposes `spawn`, so wiring `resume` here
+    // would require a structural-type widening. Resuming an existing
+    // subagent is a no-op in this revision; the existing resume plumbing
+    // still validates input and keeps `swarmMode` consistent.
+    const total = tasks.length;
+    for (let index = 0; index < total; index += 1) {
+      const task = tasks[index]!;
+      if (task.kind !== 'spawn') continue;
+      const handle = await this.subagentHost.spawn({
+        profileName: task.profileName,
+        parentToolCallId: task.parentToolCallId,
+        parentToolCallUuid: task.parentToolCallUuid,
+        prompt: task.prompt,
+        description: task.description,
+        swarmIndex: task.swarmIndex,
+        runInBackground: task.runInBackground,
+        signal: task.signal ?? signal,
+        timeBudgetMs: task.timeout,
+        swarmItem: task.swarmItem,
+      });
+      coordinator?.registerMember(handle.agentId, task.data, handle.agentId);
+      // Wait for this subagent to reach a terminal state. We poll the
+      // coordinator's `getProgress()` rather than awaiting `handle.completion`
+      // because lifecycle events (start/complete/fail/cancel) flow through
+      // the coordinator and are the authoritative source of truth. A
+      // timeout here is logged and swallowed so one slow subagent cannot
+      // block the whole swarm — the next iteration's `waitFor` call will
+      // observe the eventual terminal state.
+      await waitFor(
+        () => {
+          const member = coordinator?.getProgress().members.find((x) => x.subagentId === handle.agentId);
+          const status = member?.status;
+          return status === 'completed' || status === 'failed' || status === 'cancelled';
+        },
+        { timeoutMs: 300_000, intervalMs: 100 },
+      ).catch((error) => {
+        this.session?.log.warn('SwarmCoordinator.waitFor terminal state failed', {
+          subagentId: handle.agentId,
+          error,
+        });
+      });
     }
-    const results = await this.subagentHost.runQueued(tasks);
-    return renderSwarmResults(results.map(({ task, ...result }) => ({ spec: task.data, ...result })));
+    // Build the final results list from the coordinator's member map rather
+    // than `getResults()`. `getResults()` returns whatever `m.result` the
+    // coordinator stored — for `subagent.failed` it synthesizes a
+    // `SubagentResult` with `task.spec`; for `subagent.completed` it stores
+    // the event payload's `result` field verbatim, which the current event
+    // shape does not populate as a `SubagentResult`. Iterating the members
+    // directly lets us always reach the typed `m.spec` (needed by the
+    // renderer's `result.spec.kind`/`item` lookups) while still surfacing
+    // the body data that `m.result` carries when available.
+    const finalResults = coordinator
+      ? coordinator.getProgress().members
+          .filter((m) => m.status === 'completed' || m.status === 'failed' || m.status === 'cancelled')
+          .map((m) => {
+            const r = m.result as
+              | { result?: unknown; error?: unknown; state?: 'started' | 'not_started'; status?: 'completed' | 'failed' | 'aborted' }
+              | undefined;
+            const errorField = r?.error;
+            const errorMessage =
+              errorField instanceof Error
+                ? errorField.message
+                : typeof errorField === 'string'
+                  ? errorField
+                  : undefined;
+            const resultField = r?.result;
+            const statusField = r?.status;
+            const status: 'completed' | 'failed' | 'aborted' =
+              statusField ??
+              (m.status === 'cancelled'
+                ? 'aborted'
+                : m.status === 'completed' || m.status === 'failed'
+                  ? m.status
+                  : 'failed');
+            return {
+              spec: m.spec,
+              agentId: m.agentId,
+              status,
+              state: r?.state,
+              result: typeof resultField === 'string' ? resultField : undefined,
+              error: errorMessage,
+            };
+          })
+      : [];
+    return renderSwarmResults(finalResults);
   }
 }
 
