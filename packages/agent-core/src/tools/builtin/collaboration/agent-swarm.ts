@@ -72,7 +72,7 @@ interface AgentSwarmResumeSpec {
   readonly prompt: string;
 }
 
-type AgentSwarmSpec = AgentSwarmSpawnSpec | AgentSwarmResumeSpec;
+export type AgentSwarmSpec = AgentSwarmSpawnSpec | AgentSwarmResumeSpec;
 
 interface SwarmRunResult {
   readonly spec: AgentSwarmSpec;
