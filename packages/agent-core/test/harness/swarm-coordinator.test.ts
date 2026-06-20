@@ -98,4 +98,37 @@ describe('SwarmCoordinator integration', () => {
 
     expect(ctx.agent.swarmMode.isActive).toBe(false);
   });
+
+  // Skipped: `testAgent({})` constructs only an `Agent` (not a `Session`),
+  // and `Agent.session` / `Agent.orchestrationHooks` are both `undefined`
+  // in that mode. Reaching `session.orchestrationHooks.on(...)` therefore
+  // requires wiring up a real `Session` via `new Session(...)` (with a
+  // real homedir, kaos, rpc, etc.), which is outside the scope of the
+  // swarm-coordinator harness. The behaviour we want to cover here —
+  // `OrchestrationHooks.on(event, handler)` receiving emitted events
+  // through the real channel — is already exercised end-to-end at the
+  // unit level in `test/session/orchestration-hooks.test.ts`
+  // (`OrchestrationHooks.on` describe block). Re-enable this case once
+  // the harness exposes a `session` accessor on the agent.
+  it.skipIf(true)(
+    'OrchestrationHooks.on receives emitted events through the real channel',
+    async () => {
+      const ctx = await testAgent({});
+      const agent = ctx.agent as unknown as {
+        session: {
+          orchestrationHooks: {
+            on: (e: string, h: (ev: unknown) => void) => () => void;
+            emit: (e: { type: string; payload: unknown }) => void;
+          };
+        };
+      };
+      const handler = vi.fn();
+      agent.session.orchestrationHooks.on('subagent.started', handler);
+      agent.session.orchestrationHooks.emit({
+        type: 'subagent.started',
+        payload: { subagentId: 'agent-real-1' },
+      });
+      expect(handler).toHaveBeenCalledTimes(1);
+    },
+  );
 });
