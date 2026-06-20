@@ -10,6 +10,7 @@ export interface OrchestrationEvent {
     | 'task.unblocked'
     | 'subagent.completed'
     | 'subagent.failed'
+    | 'subagent.suspended'
     | 'subagent.started'
     | 'goal.started'
     | 'goal.completed'
