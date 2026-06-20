@@ -830,9 +830,3 @@ git commit -m "chore(swarm): phase 4 quality gates and build fixes"
 ## Next phase note
 
 After Phase 4 lands, the swarm subsystem has: `AgentSwarmTool` (refactored for guaranteed cleanup), `SwarmCoordinator` (per-run tracker with `getProgress/getResults/cancelAll/retryFailed`), and the existing `SubagentBatch` scheduler. Future phases can add a session-level swarm run registry or TUI surfaces on top of the coordinator API.
-
-## Implementation note
-
-The plan's Step 5 of Task 5 said `renderSwarmResults` would consume `coordinator.getResults()`. In the implementation, `runSwarm` continues to use the raw `runQueued` results for the XML render because `SwarmCoordinator.subscribe()` is currently no-op: `OrchestrationHooks` does not expose a generic `on(event, handler)` method, so the coordinator's lifecycle tracking never populates `members[]` in production. Using `getResults()` would return `[]` and the model would see no output.
-
-The defensive shim in `SwarmCoordinator.subscribe()` and the `agent-swarm-coordinator.test.ts` mocks sidestep this for tests. Once Phase 5+ adds a real event channel (either by extending `OrchestrationHooks.on(...)` or by switching the coordinator to `agent.emitEvent`-based observation), `getResults()` becomes the source of truth and the render call should be updated.
