@@ -270,62 +270,80 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
         kind: 'spawn',
       };
     });
-    // Phase 5: switch from batched `runQueued` to a sequential
-    // `subagentHost.spawn` per task so the coordinator can register each
-    // member under the real `subagentId` returned by `spawn`, instead of a
-    // placeholder `pending-<index>` id. The trade-off is that all dispatches
-    // are serialized — parallelism is reintroduced in a later phase by
-    // re-keying the coordinator's member map on the first matching event.
+    // Phase 6: parallel dispatch + parallel completion. Restores throughput
+    // lost when Phase 5 switched to sequential `await spawn`. Each spawn
+    // returns a `SubagentHandle` with the real `agentId`; we collect all
+    // handles, register each member under its real id, then await completion
+    // in parallel via `Promise.all`.
     //
     // Resume tasks are intentionally skipped for now: the coordinator's
     // `subagentHost` adapter only exposes `spawn`, so wiring `resume` here
     // would require a structural-type widening. Resuming an existing
     // subagent is a no-op in this revision; the existing resume plumbing
     // still validates input and keeps `swarmMode` consistent.
-    const total = tasks.length;
-    for (let index = 0; index < total; index += 1) {
-      const task = tasks[index]!;
-      if (task.kind !== 'spawn') continue;
-      const handle = await this.subagentHost.spawn({
-        profileName: task.profileName,
-        parentToolCallId: task.parentToolCallId,
-        parentToolCallUuid: task.parentToolCallUuid,
-        prompt: task.prompt,
-        description: task.description,
-        swarmIndex: task.swarmIndex,
-        runInBackground: task.runInBackground,
-        signal: task.signal ?? signal,
-        timeBudgetMs: task.timeout,
-        swarmItem: task.swarmItem,
-      });
-      coordinator?.registerMember(handle.agentId, task.data, handle.agentId);
-      // Wait for this subagent to reach a terminal state. We poll the
-      // coordinator's `getProgress()` rather than awaiting `handle.completion`
-      // because lifecycle events (start/complete/fail/cancel) flow through
-      // the coordinator and are the authoritative source of truth. A
-      // timeout here is logged and swallowed so one slow subagent cannot
-      // block the whole swarm — the next iteration's `waitFor` call will
-      // observe the eventual terminal state.
-      //
-      // Skip the wait entirely when there is no coordinator (e.g. test
-      // harnesses that construct an Agent without a Session); without the
-      // coordinator there are no lifecycle events to observe and waiting
-      // would block the tool call indefinitely.
-      if (coordinator !== null) {
-        await waitFor(
-          () => {
-            const member = coordinator.getProgress().members.find((x) => x.subagentId === handle.agentId);
-            const status = member?.status;
-            return status === 'completed' || status === 'failed' || status === 'cancelled';
-          },
-          { timeoutMs: 300_000, intervalMs: 100 },
-        ).catch((error) => {
-          this.session?.log.warn('SwarmCoordinator.waitFor terminal state failed', {
-            subagentId: handle.agentId,
-            error,
-          });
-        });
+    const spawnable = tasks.filter(
+      (t): t is Extract<typeof t, { kind: 'spawn' }> => t.kind === 'spawn',
+    );
+    const handles = await Promise.all(
+      spawnable.map((task) =>
+        this.subagentHost.spawn({
+          profileName: task.profileName,
+          parentToolCallId: task.parentToolCallId,
+          parentToolCallUuid: task.parentToolCallUuid,
+          prompt: task.prompt,
+          description: task.description,
+          swarmIndex: task.swarmIndex,
+          runInBackground: task.runInBackground,
+          signal: task.signal ?? signal,
+          timeBudgetMs: task.timeout,
+          swarmItem: task.swarmItem,
+        }),
+      ),
+    );
+    for (let index = 0; index < spawnable.length; index += 1) {
+      const handle = handles[index];
+      const spec = spawnable[index]?.data;
+      if (handle !== undefined && spec !== undefined) {
+        coordinator?.registerMember(handle.agentId, spec, handle.agentId);
       }
+    }
+
+    // Wait for each spawned subagent to reach a terminal state. We poll the
+    // coordinator's `getProgress()` rather than awaiting `handle.completion`
+    // because lifecycle events (start/complete/fail/cancel) flow through the
+    // coordinator and are the authoritative source of truth. A timeout here
+    // is logged and swallowed so one slow subagent cannot block the whole
+    // swarm — the parallel `waitFor` calls all observe the same coordinator
+    // and resolve independently as their corresponding members settle.
+    //
+    // Skip the wait entirely when there is no coordinator (e.g. test
+    // harnesses that construct an Agent without a Session); without the
+    // coordinator there are no lifecycle events to observe and waiting
+    // would block the tool call indefinitely.
+    if (coordinator !== null) {
+      await Promise.all(
+        handles.map((handle) =>
+          waitFor(
+            () => {
+              const member = coordinator.getProgress().members.find(
+                (x) => x.subagentId === handle.agentId,
+              );
+              const status = member?.status;
+              return (
+                status === 'completed' ||
+                status === 'failed' ||
+                status === 'cancelled'
+              );
+            },
+            { timeoutMs: 300_000, intervalMs: 100 },
+          ).catch((error) => {
+            this.session?.log.warn(
+              'SwarmCoordinator.waitFor terminal state failed',
+              { subagentId: handle.agentId, error },
+            );
+          }),
+        ),
+      );
     }
     // Build the final results list from the coordinator's member map rather
     // than `getResults()`. `getResults()` returns whatever `m.result` the
