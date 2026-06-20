@@ -7,7 +7,7 @@ import type { Agent } from '..';
 import { ErrorCodes, KimiError } from '#/errors';
 import { isUserActivatableSkillType, type SkillRegistry } from '../../skill';
 import type { SkillActivationOrigin } from '../context';
-import { renderUserSlashSkillPrompt } from './prompt';
+import { renderAutoRoutedSkillPrompt, renderUserSlashSkillPrompt } from './prompt';
 
 export class SkillManager {
   constructor(
@@ -28,8 +28,46 @@ export class SkillManager {
     }
 
     const skillArgs = input.args ?? '';
+    const origin: SkillActivationOrigin = {
+      kind: 'skill_activation',
+      activationId: randomUUID(),
+      skillName: skill.name,
+      trigger,
+      skillType: skill.metadata.type,
+      skillPath: skill.path,
+      skillSource: skill.source,
+      skillArgs: input.args,
+    };
+
+    if (trigger === 'auto-routed') {
+      // Auto-routed skills fire inside the orchestrator's `beforeStep`
+      // hook, while the user's turn is already active. `TurnFlow.launch`
+      // rejects `turn.prompt` in that state with `turn.agent_busy`, so we
+      // emit the activation observability events directly and inject the
+      // rendered skill content into the conversation inline (the same
+      // way the model-driven SkillTool does). This is what makes the
+      // routed skill body actually reach the model.
+      this.emitActivation(origin);
+      const skillContent = this.registry.renderSkillPrompt(skill, skillArgs);
+      this.agent.context.appendUserMessage(
+        [
+          {
+            type: 'text' as const,
+            text: renderAutoRoutedSkillPrompt({
+              skillName: skill.name,
+              skillArgs,
+              skillContent,
+              skillSource: skill.source,
+            }),
+          },
+        ],
+        origin,
+      );
+      return;
+    }
+
     const skillContent = this.registry.renderSkillPrompt(skill, skillArgs);
-    const wrapped = [
+    const wrapped: ContentPart[] = [
       {
         type: 'text' as const,
         text: renderUserSlashSkillPrompt({
@@ -41,25 +79,20 @@ export class SkillManager {
       },
     ];
 
-    this.recordActivation(
-      {
-        kind: 'skill_activation',
-        activationId: randomUUID(),
-        skillName: skill.name,
-        trigger,
-        skillType: skill.metadata.type,
-        skillPath: skill.path,
-        skillSource: skill.source,
-        skillArgs: input.args,
-      },
-      wrapped,
-    );
+    this.recordActivation(origin, wrapped);
   }
 
   recordActivation(
     origin: SkillActivationOrigin,
     input?: readonly ContentPart[] | undefined,
   ): void {
+    this.emitActivation(origin);
+    if (input !== undefined) {
+      this.agent.turn.prompt(input, origin);
+    }
+  }
+
+  private emitActivation(origin: SkillActivationOrigin): void {
     this.agent.emitEvent({
       type: 'skill.activated',
       activationId: origin.activationId,
@@ -77,9 +110,6 @@ export class SkillManager {
       this.agent.telemetry.track('flow_invoked', {
         flow_name: origin.skillName,
       });
-    }
-    if (input !== undefined) {
-      this.agent.turn.prompt(input, origin);
     }
   }
 }

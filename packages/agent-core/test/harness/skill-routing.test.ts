@@ -62,11 +62,12 @@ describe('SkillRoutingPolicy integration', () => {
 
     // The skill routing policy fires inside the orchestrator's `beforeStep`
     // hook, before the model call. It should call `agent.skills.activate`
-    // with the auto-routed trigger, which emits a `skill.activated` event
-    // on the agent's RPC. That event is the most reliable end-to-end
-    // observable of the auto-activation (the wrapped skill prompt that
-    // `SkillManager.activate` tries to enqueue is dropped because the
-    // turn is already active by the time the policy runs).
+    // with the auto-routed trigger, which:
+    //   1. Emits a `skill.activated` event on the agent's RPC.
+    //   2. Injects the rendered skill body into `agent.context.history`
+    //      inline (the orchestrator's turn is already active, so the
+    //      SkillManager cannot enqueue a new `turn.prompt`; it appends
+    //      to the live conversation instead).
     const activated = ctx.allEvents.find(
       (event) => event.type === '[rpc]' && event.event === 'skill.activated',
     );
@@ -74,5 +75,24 @@ describe('SkillRoutingPolicy integration', () => {
     const args = (activated as { args: Record<string, unknown> }).args;
     expect(args['skillName']).toBe('database-helper');
     expect(args['trigger']).toBe('auto-routed');
+
+    const inlineSkillMessages = ctx.agent.context.history.filter(
+      (message) =>
+        message.role === 'user' &&
+        Array.isArray(message.content) &&
+        message.content.some(
+          (part) =>
+            part.type === 'text' &&
+            part.text.includes('database-helper body') &&
+            part.text.includes('trigger="auto-routed"'),
+        ),
+    );
+    expect(inlineSkillMessages.length).toBe(1);
+    const origin = inlineSkillMessages[0]?.origin;
+    expect(origin).toMatchObject({
+      kind: 'skill_activation',
+      skillName: 'database-helper',
+      trigger: 'auto-routed',
+    });
   });
 });

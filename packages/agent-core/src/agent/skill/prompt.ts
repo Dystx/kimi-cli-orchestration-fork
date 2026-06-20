@@ -1,7 +1,7 @@
 import { escapeXml } from '#/utils/xml-escape';
 import type { SkillSource } from '../../skill';
 
-export type SkillPromptTrigger = 'user-slash' | 'model-tool' | 'nested-skill';
+export type SkillPromptTrigger = 'user-slash' | 'model-tool' | 'nested-skill' | 'auto-routed';
 
 export interface RenderSkillPromptInput {
   readonly skillName: string;
@@ -31,6 +31,14 @@ export function renderModelToolSkillPrompt(input: RenderModelToolSkillPromptInpu
     'Skill tool loaded instructions for this request. Follow them.',
     '',
     renderSkillLoadedBlock({ ...input, trigger: input.trigger }),
+  ].join('\n');
+}
+
+export function renderAutoRoutedSkillPrompt(input: RenderSkillPromptInput): string {
+  return [
+    'Skill auto-loaded by the routing policy. Follow its instructions.',
+    '',
+    renderSkillLoadedBlock({ ...input, trigger: 'auto-routed' }),
   ].join('\n');
 }
 
