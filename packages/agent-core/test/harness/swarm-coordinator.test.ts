@@ -83,18 +83,22 @@ describe('SwarmCoordinator integration', () => {
     expect(ctx.agent.swarmMode.isActive).toBe(false);
   });
 
-  // Skipped: `testAgent({})` constructs only an `Agent` (not a `Session`),
-  // and `Agent.session` / `Agent.orchestrationHooks` are both `undefined`
-  // in that mode. Reaching `session.orchestrationHooks.on(...)` therefore
-  // requires wiring up a real `Session` via `new Session(...)` (with a
-  // real homedir, kaos, rpc, etc.), which is outside the scope of the
-  // swarm-coordinator harness. The behaviour we want to cover here —
-  // `OrchestrationHooks.on(event, handler)` receiving emitted events
-  // through the real channel — is already exercised end-to-end at the
-  // unit level in `test/session/orchestration-hooks.test.ts`
-  // (`OrchestrationHooks.on` describe block). Re-enable this case once
-  // the harness exposes a `session` accessor on the agent.
-  it.skipIf(true)(
+  // Phase 7 Task 4: the harness does not construct a `Session`, so
+  // `agent.session` is undefined and `agent.orchestrationHooks` is
+  // also undefined (it is populated from `AgentOptions.orchestration`,
+  // which the harness does not pass). Reaching the on/emit channel
+  // end-to-end through this harness would require wiring a real
+  // `Session` (with homedir, kaos, rpc, ...), which is out of scope
+  // for the swarm-coordinator smoke suite.
+  //
+  // The behaviour we want to cover here — `OrchestrationHooks.on(event,
+  // handler)` receiving emitted events through the real channel — is
+  // already exercised at the unit level in
+  // `test/session/orchestration-hooks.test.ts` (`OrchestrationHooks.on`
+  // describe block). The body below is preserved so the case is
+  // trivially re-enableable the moment the harness exposes a session
+  // accessor on the agent.
+  it.skip(
     'OrchestrationHooks.on receives emitted events through the real channel',
     async () => {
       const ctx = testAgent({});
