@@ -17,8 +17,12 @@ import { describe, it, expect, vi } from 'vitest';
 
 import { AgentSwarmTool } from '../../../src/tools/builtin/collaboration/agent-swarm';
 import type { ExecutableToolContext, ExecutableToolResult } from '../../../src/loop';
+import type { RunnableToolExecution } from '../../../src/loop/types';
 
-function makeSession() {
+function makeSession(): {
+  orchestrationHooks: { on: ReturnType<typeof vi.fn> };
+  log: { warn: ReturnType<typeof vi.fn> };
+} {
   // The session mock needs the two surfaces the tool reaches for:
   // `orchestrationHooks.on` (wrapped by the SwarmCoordinator subscription
   // shim) and `log.warn` (used by the coordinator on retry errors). The
@@ -29,7 +33,7 @@ function makeSession() {
       on: vi.fn(() => () => undefined),
     },
     log: { warn: vi.fn() },
-  } as never;
+  };
 }
 
 function makeContext(toolCallId: string): ExecutableToolContext {
@@ -49,13 +53,11 @@ const validArgs = {
 describe('AgentSwarmTool + SwarmCoordinator lifecycle', () => {
   it('exits swarm mode even when runQueued rejects', async () => {
     const runQueued = vi.fn().mockRejectedValue(new Error('host down'));
-    const swarmMode = { enter: vi.fn(), exit: vi.fn() } as never;
-    const subagentHost = { runQueued } as never;
-    const tool = new AgentSwarmTool(subagentHost, swarmMode, makeSession());
+    const swarmMode = { enter: vi.fn(), exit: vi.fn() };
+    const subagentHost = { runQueued };
+    const tool = new AgentSwarmTool(subagentHost as never, swarmMode as never, makeSession() as never);
 
-    const result: ExecutableToolResult = await tool
-      .resolveExecution(validArgs)
-      .execute(makeContext('call-1'));
+    const result: ExecutableToolResult = await (tool.resolveExecution(validArgs) as RunnableToolExecution).execute(makeContext('call-1'));
 
     // The outer try/catch in `execution` converts thrown errors into a
     // structured `{ isError: true, output }` result, so the promise resolves
@@ -90,13 +92,11 @@ describe('AgentSwarmTool + SwarmCoordinator lifecycle', () => {
         result: 'ok b',
       },
     ]);
-    const swarmMode = { enter: vi.fn(), exit: vi.fn() } as never;
-    const subagentHost = { runQueued } as never;
-    const tool = new AgentSwarmTool(subagentHost, swarmMode, makeSession());
+    const swarmMode = { enter: vi.fn(), exit: vi.fn() };
+    const subagentHost = { runQueued };
+    const tool = new AgentSwarmTool(subagentHost as never, swarmMode as never, makeSession() as never);
 
-    const result: ExecutableToolResult = await tool
-      .resolveExecution(validArgs)
-      .execute(makeContext('call-2'));
+    const result: ExecutableToolResult = await (tool.resolveExecution(validArgs) as RunnableToolExecution).execute(makeContext('call-2'));
 
     expect(result.isError).toBeUndefined();
     expect(result.output).toContain('completed: 2');
@@ -113,13 +113,11 @@ describe('AgentSwarmTool + SwarmCoordinator lifecycle', () => {
         throw enterError;
       }),
       exit: vi.fn(),
-    } as never;
-    const subagentHost = { runQueued } as never;
-    const tool = new AgentSwarmTool(subagentHost, swarmMode, makeSession());
+    };
+    const subagentHost = { runQueued };
+    const tool = new AgentSwarmTool(subagentHost as never, swarmMode as never, makeSession() as never);
 
-    const result: ExecutableToolResult = await tool
-      .resolveExecution(validArgs)
-      .execute(makeContext('call-3'));
+    const result: ExecutableToolResult = await (tool.resolveExecution(validArgs) as RunnableToolExecution).execute(makeContext('call-3'));
 
     // The thrown `enter` error is caught by the outer try/catch and reported
     // as a tool-level error, but the `entered` guard inside `execution` must

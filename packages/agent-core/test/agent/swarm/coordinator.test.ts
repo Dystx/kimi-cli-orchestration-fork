@@ -7,7 +7,14 @@ function spec(name: string): AgentSwarmSpec {
   return { description: name } as unknown as AgentSwarmSpec;
 }
 
-function makeAgent() {
+function makeAgent(): {
+  handlers: Map<string, Array<(e: unknown) => void>>;
+  session: {
+    orchestrationHooks: { on(event: string, handler: (e: unknown) => void): () => void };
+    subagentHost: { spawn: ReturnType<typeof vi.fn> };
+  };
+  log: { warn: ReturnType<typeof vi.fn> };
+} {
   const handlers = new Map<string, Array<(e: unknown) => void>>();
   const hooks = {
     on(event: string, handler: (e: unknown) => void) {
@@ -27,7 +34,7 @@ function makeAgent() {
       subagentHost: { spawn: vi.fn() },
     },
     log: { warn: vi.fn() },
-  } as never;
+  };
 }
 
 function emit(handlers: Map<string, Array<(e: unknown) => void>>, event: string, payload: unknown) {
@@ -35,9 +42,15 @@ function emit(handlers: Map<string, Array<(e: unknown) => void>>, event: string,
 }
 
 describe('SwarmCoordinator', () => {
+  // The mock agent satisfies SwarmCoordinator's structural type via cast at the
+  // constructor call site; vi.fn() returns Mock<...> which isn't strictly
+  // compatible with the expected return shapes.
+  const newCoordinator = (agent: ReturnType<typeof makeAgent>) =>
+    new SwarmCoordinator('run-1', agent as never, new AbortController());
+
   it('registerMember + getProgress reports total', () => {
     const agent = makeAgent();
-    const c = new SwarmCoordinator('run-1', agent, new AbortController());
+    const c = newCoordinator(agent);
     c.registerMember('a', spec('a'));
     c.registerMember('b', spec('b'));
     const p = c.getProgress();
@@ -48,7 +61,7 @@ describe('SwarmCoordinator', () => {
 
   it('marks members completed on subagent.completed', () => {
     const agent = makeAgent();
-    const c = new SwarmCoordinator('run-1', agent, new AbortController());
+    const c = newCoordinator(agent);
     c.registerMember('a', spec('a'));
     c.registerMember('b', spec('b'));
     emit(agent.handlers, 'subagent.started', { subagentId: 'a' });
@@ -65,7 +78,7 @@ describe('SwarmCoordinator', () => {
 
   it('marks members failed on subagent.failed', () => {
     const agent = makeAgent();
-    const c = new SwarmCoordinator('run-1', agent, new AbortController());
+    const c = newCoordinator(agent);
     c.registerMember('a', spec('a'));
     emit(agent.handlers, 'subagent.failed', { subagentId: 'a', error: new Error('boom') });
     const p = c.getProgress();
@@ -78,7 +91,7 @@ describe('SwarmCoordinator', () => {
   it('cancelAll aborts and marks in-flight as cancelled', async () => {
     const agent = makeAgent();
     const controller = new AbortController();
-    const c = new SwarmCoordinator('run-1', agent, controller);
+    const c = new SwarmCoordinator('run-1', agent as never, controller);
     c.registerMember('a', spec('a'));
     c.registerMember('b', spec('b'));
     emit(agent.handlers, 'subagent.started', { subagentId: 'a' });
@@ -92,14 +105,14 @@ describe('SwarmCoordinator', () => {
 
   it('cancelAll is idempotent and safe on disposed coordinator', async () => {
     const agent = makeAgent();
-    const c = new SwarmCoordinator('run-1', agent, new AbortController());
+    const c = newCoordinator(agent);
     c.dispose();
     await expect(c.cancelAll('x')).resolves.toBeUndefined();
   });
 
   it('dispose unsubscribes from all hooks', () => {
     const agent = makeAgent();
-    const c = new SwarmCoordinator('run-1', agent, new AbortController());
+    const c = newCoordinator(agent);
     expect(agent.handlers.get('subagent.started')?.length ?? 0).toBeGreaterThan(0);
     c.dispose();
     expect(agent.handlers.get('subagent.started')?.length ?? 0).toBe(0);
@@ -107,7 +120,7 @@ describe('SwarmCoordinator', () => {
 
   it('retryFailed skips non-failed members', async () => {
     const agent = makeAgent();
-    const c = new SwarmCoordinator('run-1', agent, new AbortController());
+    const c = newCoordinator(agent);
     c.registerMember('a', spec('a'));
     emit(agent.handlers, 'subagent.completed', { subagentId: 'a', result: { status: 'completed' } });
     const retried = await c.retryFailed();
@@ -118,7 +131,7 @@ describe('SwarmCoordinator', () => {
 
   it('retryFailed re-spawns failed members', async () => {
     const agent = makeAgent();
-    const c = new SwarmCoordinator('run-1', agent, new AbortController());
+    const c = newCoordinator(agent);
     c.registerMember('a', spec('a'));
     emit(agent.handlers, 'subagent.failed', { subagentId: 'a', error: new Error('boom') });
     await c.retryFailed();
@@ -128,7 +141,7 @@ describe('SwarmCoordinator', () => {
 
   it('ignores events for unknown subagentIds', () => {
     const agent = makeAgent();
-    const c = new SwarmCoordinator('run-1', agent, new AbortController());
+    const c = newCoordinator(agent);
     emit(agent.handlers, 'subagent.completed', { subagentId: 'ghost', result: { status: 'completed' } });
     const p = c.getProgress();
     expect(p.total).toBe(0);
