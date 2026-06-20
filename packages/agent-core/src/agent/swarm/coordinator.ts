@@ -41,6 +41,7 @@ export class SwarmCoordinator {
     private readonly abortController: AbortController,
   ) {
     this.runId = runId;
+    this.subscribe();
   }
 
   registerMember(subagentId: string, spec: AgentSwarmSpec, agentId?: string): void {
@@ -67,7 +68,61 @@ export class SwarmCoordinator {
     return out;
   }
 
-  // Tasks 2–5 will fill in subscribe, cancelAll, retryFailed.
+  subscribe(): void {
+    if (this.disposed) return;
+    const hooks = this.agent.session.orchestrationHooks as unknown as {
+      on(event: string, handler: (e: unknown) => void): () => void;
+    };
+    const off = (event: string, handler: (e: unknown) => void) => {
+      this.unsubscribers.push(hooks.on(event, handler));
+    };
+
+    off('subagent.started', (e) => {
+      const id = (e as { subagentId?: string }).subagentId;
+      if (id === undefined) return;
+      const m = this.members.get(id);
+      if (m === undefined) return;
+      m.status = 'started';
+      m.startedAt = Date.now();
+    });
+
+    off('subagent.suspended', (e) => {
+      const id = (e as { subagentId?: string }).subagentId;
+      if (id === undefined) return;
+      const m = this.members.get(id);
+      if (m === undefined) return;
+      m.status = 'suspended';
+    });
+
+    off('subagent.completed', (e) => {
+      const id = (e as { subagentId?: string }).subagentId;
+      if (id === undefined) return;
+      const m = this.members.get(id);
+      if (m === undefined) return;
+      const result = (e as { result?: SubagentResult }).result;
+      m.status = 'completed';
+      m.completedAt = Date.now();
+      if (result !== undefined) m.result = result;
+    });
+
+    off('subagent.failed', (e) => {
+      const id = (e as { subagentId?: string }).subagentId;
+      if (id === undefined) return;
+      const m = this.members.get(id);
+      if (m === undefined) return;
+      m.status = 'failed';
+      m.completedAt = Date.now();
+      const err = (e as { error?: unknown }).error;
+      m.result = {
+        task: { kind: 'spawn', spec: m.spec },
+        agentId: m.agentId,
+        status: 'failed',
+        error: err instanceof Error ? err : new Error(String(err)),
+      } as unknown as SubagentResult;
+    });
+  }
+
+  // Tasks 3–5 will fill in cancelAll, retryFailed.
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
