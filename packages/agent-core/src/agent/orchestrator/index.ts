@@ -2,6 +2,7 @@ import type { PromptOrigin } from '../context/types';
 import type { Agent } from '../index';
 import type {
   OrchestrationPolicy,
+  OrchestratorDiagnostics,
   OrchestratorInjection,
   OrchestratorResult,
   TurnContext,
@@ -15,6 +16,14 @@ const ORCHESTRATOR_ORIGIN: PromptOrigin = {
 export class Orchestrator {
   private readonly agent: Agent;
   private readonly policies: OrchestrationPolicy[] = [];
+  private readonly diagnosticState = new Map<
+    string,
+    {
+      fireCount: number;
+      lastFiredAt?: number;
+      lastError?: { message: string; at: number };
+    }
+  >();
 
   constructor(agent: Agent) {
     this.agent = agent;
@@ -37,19 +46,24 @@ export class Orchestrator {
     phase: 'beforeStep' | 'afterStep',
   ): Promise<void> {
     for (const policy of this.policies) {
+      const handler = policy[phase];
+      if (handler === undefined) {
+        continue;
+      }
       try {
-        const handler = policy[phase];
-        if (handler === undefined) {
-          continue;
-        }
         const result = await handler.call(policy, ctx);
         this.applyInjections(result);
+        const state = this.diagnosticState.get(policy.name) ?? { fireCount: 0 };
+        state.fireCount += 1;
+        state.lastFiredAt = Date.now();
+        this.diagnosticState.set(policy.name, state);
       } catch (error) {
         this.agent.log.warn('orchestrator policy failed', {
           policy: policy.name,
           phase,
           error,
         });
+        this.recordError(policy.name, error);
       }
     }
   }
@@ -95,5 +109,39 @@ export class Orchestrator {
         });
       }
     }
+  }
+
+  getDiagnostics(): OrchestratorDiagnostics {
+    return {
+      policies: this.policies.map((p) => {
+        const state = this.diagnosticState.get(p.name);
+        return {
+          name: p.name,
+          fireCount: state?.fireCount ?? 0,
+          lastFiredAt: state?.lastFiredAt,
+          lastError: state?.lastError,
+        };
+      }),
+      totals: this.computeTotals(),
+    };
+  }
+
+  private computeTotals(): { injections: number; errors: number } {
+    let injections = 0;
+    let errors = 0;
+    for (const state of this.diagnosticState.values()) {
+      injections += state.fireCount;
+      if (state.lastError !== undefined) errors += 1;
+    }
+    return { injections, errors };
+  }
+
+  recordError(policyName: string, error: unknown): void {
+    const state = this.diagnosticState.get(policyName) ?? { fireCount: 0 };
+    state.lastError = {
+      message: error instanceof Error ? error.message : String(error),
+      at: Date.now(),
+    };
+    this.diagnosticState.set(policyName, state);
   }
 }

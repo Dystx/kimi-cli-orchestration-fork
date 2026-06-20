@@ -20,3 +20,15 @@ export interface OrchestrationPolicy {
   beforeStep(ctx: TurnContext): Promise<OrchestratorResult> | OrchestratorResult;
   afterStep?(ctx: TurnContext): Promise<OrchestratorResult> | OrchestratorResult;
 }
+
+export interface PolicyDiagnostic {
+  readonly name: string;
+  readonly fireCount: number;
+  readonly lastFiredAt?: number;
+  readonly lastError?: { readonly message: string; readonly at: number };
+}
+
+export interface OrchestratorDiagnostics {
+  readonly policies: readonly PolicyDiagnostic[];
+  readonly totals: { readonly injections: number; readonly errors: number };
+}
