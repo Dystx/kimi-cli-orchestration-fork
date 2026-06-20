@@ -31,7 +31,7 @@ function makeAgent(): {
     handlers,
     session: {
       orchestrationHooks: hooks,
-      subagentHost: { spawn: vi.fn() },
+      subagentHost: { spawn: vi.fn(() => ({ subagentId: 'agent-retry-1' })) },
     },
     log: { warn: vi.fn() },
   };
@@ -129,13 +129,17 @@ describe('SwarmCoordinator', () => {
     c.dispose();
   });
 
-  it('retryFailed re-spawns failed members', async () => {
+  it('retryFailed re-spawns failed members and re-keys the map', async () => {
     const agent = makeAgent();
     const c = newCoordinator(agent);
     c.registerMember('a', spec('a'));
     emit(agent.handlers, 'subagent.failed', { subagentId: 'a', error: new Error('boom') });
     await c.retryFailed();
     expect(agent.session.subagentHost.spawn).toHaveBeenCalledTimes(1);
+    // The re-keyed member should be findable under its new id and back in 'spawned'.
+    const member = c.getProgress().members.find((m) => m.subagentId === 'agent-retry-1');
+    expect(member).toBeDefined();
+    expect(member!.status).toBe('spawned');
     c.dispose();
   });
 
