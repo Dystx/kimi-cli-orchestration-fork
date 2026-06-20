@@ -151,7 +151,6 @@ export class SwarmCoordinator {
     );
     if (failed.length === 0) return [];
 
-    const newResults: SubagentResult[] = [];
     for (const m of failed) {
       this.retried.add(m.subagentId);
       try {
@@ -182,8 +181,10 @@ export class SwarmCoordinator {
     }
 
     // Best-effort: give the new spawns a chance to settle before returning.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    return newResults;
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    return [];
   }
 
   dispose(): void {
