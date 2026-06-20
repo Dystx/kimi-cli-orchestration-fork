@@ -28,6 +28,17 @@ export interface SwarmProgress {
   readonly members: readonly SwarmMember[];
 }
 
+function getSubagentId(e: unknown): string | undefined {
+  if (typeof e !== 'object' || e === null) return undefined;
+  const obj = e as { subagentId?: unknown; payload?: unknown };
+  if (typeof obj.subagentId === 'string') return obj.subagentId;
+  if (typeof obj.payload === 'object' && obj.payload !== null) {
+    const p = obj.payload as { subagentId?: unknown };
+    if (typeof p.subagentId === 'string') return p.subagentId;
+  }
+  return undefined;
+}
+
 export class SwarmCoordinator {
   readonly runId: string;
   private readonly members = new Map<string, SwarmMember>();
@@ -86,7 +97,7 @@ export class SwarmCoordinator {
     };
 
     off('subagent.started', (e) => {
-      const id = (e as { subagentId?: string }).subagentId;
+      const id = getSubagentId(e);
       if (id === undefined) return;
       const m = this.members.get(id);
       if (m === undefined) return;
@@ -95,7 +106,7 @@ export class SwarmCoordinator {
     });
 
     off('subagent.suspended', (e) => {
-      const id = (e as { subagentId?: string }).subagentId;
+      const id = getSubagentId(e);
       if (id === undefined) return;
       const m = this.members.get(id);
       if (m === undefined) return;
@@ -103,7 +114,7 @@ export class SwarmCoordinator {
     });
 
     off('subagent.completed', (e) => {
-      const id = (e as { subagentId?: string }).subagentId;
+      const id = getSubagentId(e);
       if (id === undefined) return;
       const m = this.members.get(id);
       if (m === undefined) return;
@@ -114,7 +125,7 @@ export class SwarmCoordinator {
     });
 
     off('subagent.failed', (e) => {
-      const id = (e as { subagentId?: string }).subagentId;
+      const id = getSubagentId(e);
       if (id === undefined) return;
       const m = this.members.get(id);
       if (m === undefined) return;
