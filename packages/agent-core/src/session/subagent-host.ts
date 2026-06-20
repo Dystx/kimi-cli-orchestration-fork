@@ -270,6 +270,10 @@ export class SessionSubagentHost {
       subagentId: event.agentId,
       reason: event.reason,
     });
+    this.session.orchestrationHooks?.emit({
+      type: 'subagent.suspended',
+      payload: { subagentId: event.agentId, reason: event.reason },
+    });
   }
 
   async startBtw(): Promise<string> {
