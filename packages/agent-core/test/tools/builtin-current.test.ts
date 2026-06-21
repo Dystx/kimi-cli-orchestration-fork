@@ -89,6 +89,8 @@ type MockSessionHandle = {
     emit: (event: { type: string; subagentId?: string; result?: unknown; error?: unknown; payload?: Record<string, unknown> }) => void;
   };
   log: { warn: ReturnType<typeof vi.fn> };
+  recordSwarmRun: ReturnType<typeof vi.fn>;
+  getSwarmRuns: ReturnType<typeof vi.fn>;
 };
 
 function mockSession(): MockSessionHandle & ConstructorParameters<typeof AgentSwarmTool>[2] {
@@ -119,6 +121,13 @@ function mockSession(): MockSessionHandle & ConstructorParameters<typeof AgentSw
   return {
     orchestrationHooks: { on, emit },
     log: { warn: vi.fn() },
+    // Phase 9: SwarmCoordinator.dispose() now calls `session.recordSwarmRun`
+    // and downstream consumers (e.g. /status, /diag) may call `getSwarmRuns`.
+    // The mock session previously omitted these methods, which caused the
+    // tool to surface `this.session?.recordSwarmRun is not a function` in
+    // its result. Provide no-op implementations so the tool can finish.
+    recordSwarmRun: vi.fn(),
+    getSwarmRuns: vi.fn(() => []),
   } as unknown as MockSessionHandle & ConstructorParameters<typeof AgentSwarmTool>[2];
 }
 
