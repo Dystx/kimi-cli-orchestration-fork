@@ -111,8 +111,13 @@ export type { CronFiredEvent } from '@moonshot-ai/agent-core';
 // raw event and the structural `SwarmRunSnapshot` payload so consumers can
 // subscribe via the standard `onEvent` pipeline without reaching for
 // agent-core directly.
-export type { SwarmRunSnapshotEvent } from '@moonshot-ai/agent-core';
-export type { SwarmRunSnapshot } from '@moonshot-ai/agent-core';
+export type {
+  SwarmMemberSnapshot,
+  SwarmMemberStatus,
+  SwarmRunSnapshot,
+  SwarmRunSnapshotEvent,
+  SwarmRunTotals,
+} from '@moonshot-ai/agent-core';
 
 export type MaybePromise<T> = T | Promise<T>;
 

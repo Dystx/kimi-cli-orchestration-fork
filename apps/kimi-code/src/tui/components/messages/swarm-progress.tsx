@@ -3,50 +3,23 @@
  *
  * Mirrors the visual language of `diag-panel.ts` and `status-panel.ts` but
  * consumes a per-run snapshot emitted by the swarm coordinator and renders it
- * as a self-contained panel. The kimi-code TUI does not currently pull in
- * `ink` or `@moonshot-ai/agent-core`, and `@moonshot-ai/kimi-code-sdk` does
- * not yet re-export `SwarmRunSnapshot` / `SwarmMemberStatus` from
- * `@moonshot-ai/protocol`, so the structural shapes are reproduced here. The
- * field set must stay in sync with `packages/protocol/src/swarm.ts`; once the
- * SDK exposes the type, this file can drop the local declarations.
- *
- * NOTE: the task template uses `import { Box, Text } from 'ink'` and JSX. The
- * kimi-code TUI is built on `@earendil-works/pi-tui` (no Ink runtime in the
- * dependency graph), so this implementation returns plain `string[]` lines
- * matching the `Component.render(width)` contract used by `UsagePanelComponent`
- * and similar consumers. The file keeps the `.tsx` extension only because the
- * parent task spec mandates that path; the contents are pure TypeScript.
+ * as a self-contained panel. Returns plain `string[]` lines matching the
+ * `Component.render(width)` contract used by `UsagePanelComponent`. The file
+ * keeps the `.tsx` extension for tooling compatibility even though it has no
+ * JSX; the kimi-code TUI is built on `@earendil-works/pi-tui`, not Ink.
  */
 
+import type {
+  SwarmMemberSnapshot,
+  SwarmMemberStatus,
+  SwarmRunSnapshot,
+} from '@moonshot-ai/kimi-code-sdk';
 import chalk from 'chalk';
 
-export type SwarmMemberStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-
-export interface SwarmMemberSnapshot {
-  readonly memberId: string;
-  readonly status: SwarmMemberStatus;
-  readonly startedAt?: number;
-  readonly completedAt?: number;
-  readonly errorMessage?: string;
-}
-
-export interface SwarmRunTotals {
-  readonly queued: number;
-  readonly running: number;
-  readonly completed: number;
-  readonly failed: number;
-  readonly cancelled: number;
-}
-
-export interface SwarmRunSnapshot {
-  readonly runId: string;
-  readonly startedAt: number;
-  /** Set when the coordinator is disposed; absent while the run is in flight. */
-  readonly completedAt?: number;
-  readonly memberCount: number;
-  readonly members: readonly SwarmMemberSnapshot[];
-  readonly totals: SwarmRunTotals;
-}
+// Re-export the SDK types so consumers (`SwarmProgressController`,
+// `useSwarmProgress` callers) can keep their existing import sites
+// pointing at this module if they prefer.
+export type { SwarmMemberSnapshot, SwarmMemberStatus, SwarmRunSnapshot };
 
 const STATUS_ICON: Record<SwarmMemberStatus, string> = {
   queued: '·',
