@@ -32,6 +32,7 @@ function makeSession(): {
   };
   log: { warn: ReturnType<typeof vi.fn> };
   recordSwarmRun: ReturnType<typeof vi.fn>;
+  emitSwarmSnapshot: ReturnType<typeof vi.fn>;
 } {
   // The session mock provides the surfaces the tool reaches for:
   // `orchestrationHooks.on` (the real hook contract — the coordinator
@@ -58,6 +59,12 @@ function makeSession(): {
     orchestrationHooks,
     log: { warn: vi.fn() },
     recordSwarmRun: vi.fn(),
+    // Phase 10: SwarmCoordinator calls `session.emitSwarmSnapshot` on
+    // every member transition and on dispose (with `completedAt` set);
+    // Session.emitSwarmSnapshot then routes the final snapshot through
+    // `recordSwarmRun`. Mock the entry point so the coordinator can
+    // dispatch without throwing.
+    emitSwarmSnapshot: vi.fn(),
   };
 }
 

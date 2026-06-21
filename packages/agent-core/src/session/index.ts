@@ -54,6 +54,7 @@ import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
 import { SessionSubagentHost } from './subagent-host';
 import type { ToolServices } from '../tools/support/services';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
+import type { SwarmRunSnapshot } from '@moonshot-ai/protocol';
 import type { SessionStatusSnapshot } from './status';
 
 export type { SessionStatusSnapshot } from './status';
@@ -199,6 +200,8 @@ export class Session {
   readonly hookEngine: HookEngine;
   readonly experimentalFlags: ExperimentalFlagResolver;
   private readonly swarmRuns = new Map<string, SwarmRunSummary>();
+  private readonly activeRuns = new Map<string, SwarmRunSnapshot>();
+  private readonly swarmSubscribers = new Set<(snapshot: SwarmRunSnapshot) => void>();
   private toolKaos: Kaos;
   private persistenceKaos: Kaos;
   private agentIdCounter = 0;
@@ -1039,6 +1042,91 @@ export class Session {
    */
   getSwarmRuns(): readonly SwarmRunSummary[] {
     return Array.from(this.swarmRuns.values()).toSorted((a, b) => b.startedAt - a.startedAt);
+  }
+
+  // ── Swarm run live snapshots ─────────────────────────────────────────────
+
+  /**
+   * Subscribe to live swarm-run snapshots. The coordinator calls
+   * `emitSwarmSnapshot` for every transition, and every subscriber receives
+   * the full snapshot — there is no diffing at this layer. Returning the
+   * unsubscribe function lets callers (e.g. the TUI SDK consumer) tear down
+   * the listener without holding on to the session reference.
+   */
+  subscribeSwarmRuns(cb: (snapshot: SwarmRunSnapshot) => void): () => void {
+    this.swarmSubscribers.add(cb);
+    return () => {
+      this.swarmSubscribers.delete(cb);
+    };
+  }
+
+  /**
+   * Return the snapshot for an active swarm run. With no `runId`, returns
+   * the most recently started run that has not yet been disposed. Returns
+   * `undefined` once the coordinator has emitted a `completedAt`-bearing
+   * snapshot for every active run.
+   */
+  getActiveSwarmRun(runId?: string): SwarmRunSnapshot | undefined {
+    if (runId !== undefined) return this.activeRuns.get(runId);
+    const values = Array.from(this.activeRuns.values());
+    if (values.length === 0) return undefined;
+    return values.toSorted((a, b) => b.startedAt - a.startedAt)[0];
+  }
+
+  /**
+   * Convenience accessor that surfaces the Phase 9 completed-run registry
+   * under the `History` name. Callers using the live-progress SDK want one
+   * entry point (`History`) for everything that has settled, separate from
+   * `getActiveSwarmRun` which only ever reflects in-flight work.
+   */
+  getSwarmRunHistory(): readonly SwarmRunSummary[] {
+    return this.getSwarmRuns();
+  }
+
+  /**
+   * Internal entry point for the swarm coordinator. Routes the snapshot
+   * through the active/history registries, fires a `swarm.run.snapshot` event
+   * through the RPC layer (so SDK consumers like the TUI can subscribe via
+   * the standard event pipeline), and finally fans the snapshot out to
+   * every direct subscriber. A `completedAt` snapshot simultaneously removes
+   * the run from `activeRuns` and records a `SwarmRunSummary` so the
+   * `getSwarmRunHistory` accessor can return it without any extra wiring
+   * from the coordinator side.
+   */
+  emitSwarmSnapshot(snapshot: SwarmRunSnapshot): void {
+    if (snapshot.completedAt !== undefined) {
+      this.activeRuns.delete(snapshot.runId);
+      this.recordSwarmRun({
+        runId: snapshot.runId,
+        startedAt: snapshot.startedAt,
+        completedAt: snapshot.completedAt,
+        memberCount: snapshot.memberCount,
+        cancelledCount: snapshot.totals.cancelled,
+        failedCount: snapshot.totals.failed,
+        completedCount: snapshot.totals.completed,
+        errorCount: snapshot.members.filter((m) => m.errorMessage !== undefined).length,
+      });
+    } else {
+      this.activeRuns.set(snapshot.runId, snapshot);
+    }
+    // Fan the snapshot out to SDK/TUI consumers over the existing event pipe.
+    // The RPC layer (`SDKSessionRPC.emitEvent`) takes `AgentEvent` and tags the
+    // outgoing wire envelope with `sessionId`; we only supply the agent-side
+    // fields. The snapshot itself rides inside the typed payload.
+    void this.rpc.emitEvent({
+      type: 'swarm.run.snapshot',
+      agentId: 'main',
+      snapshot,
+    });
+    for (const cb of this.swarmSubscribers) {
+      try {
+        cb(snapshot);
+      } catch (error) {
+        // Subscriber failures must not poison the coordinator loop or block
+        // other subscribers from observing the snapshot. Log and continue.
+        this.log.warn('swarm subscriber threw', error);
+      }
+    }
   }
 }
 

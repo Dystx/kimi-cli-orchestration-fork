@@ -66,6 +66,13 @@ describe('AgentSwarmTool parallel dispatch', () => {
     const session = {
       orchestrationHooks,
       log: { warn: vi.fn() },
+      // Phase 10: SwarmCoordinator calls `session.emitSwarmSnapshot` on
+      // every member transition and on dispose (with `completedAt` set);
+      // Session routes the final snapshot through `recordSwarmRun`
+      // internally. Mock the entry point so the coordinator can dispatch
+      // without throwing — the parallel-dispatch assertion only cares
+      // about the spawn/awaitCompletion ordering.
+      emitSwarmSnapshot: vi.fn(),
     };
 
     const swarmMode = { enter: vi.fn(), exit: vi.fn() };

@@ -11,6 +11,7 @@ function makeAgent(): {
   session: {
     orchestrationHooks: { on(event: string, handler: (e: unknown) => void): () => void };
     subagentHost: { spawn: ReturnType<typeof vi.fn> };
+    emitSwarmSnapshot: ReturnType<typeof vi.fn>;
   };
   log: { warn: ReturnType<typeof vi.fn> };
 } {
@@ -31,6 +32,10 @@ function makeAgent(): {
     session: {
       orchestrationHooks: hooks,
       subagentHost: { spawn: vi.fn(() => ({ subagentId: 'agent-retry-1' })) },
+      // Phase 10: the coordinator calls `session.emitSwarmSnapshot` on every
+      // member transition and on dispose. Mock the entry point so existing
+      // tests keep passing without each assertion having to opt in.
+      emitSwarmSnapshot: vi.fn(),
     },
     log: { warn: vi.fn() },
   };

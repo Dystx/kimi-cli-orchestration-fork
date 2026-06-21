@@ -89,6 +89,7 @@ describe('Event public types', () => {
         case 'background.task.terminated':
         case 'cron.fired':
         case 'session.status':
+        case 'swarm.run.snapshot':
           return;
         default:
           assertNever(event);

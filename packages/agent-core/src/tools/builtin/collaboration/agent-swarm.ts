@@ -145,19 +145,17 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
                       (handle) => ({ subagentId: handle.agentId }),
                     ),
                 },
+                // Phase 10: the coordinator calls `session.emitSwarmSnapshot`
+                // on every member transition and on dispose (with
+                // `completedAt` set). `Session.emitSwarmSnapshot` routes
+                // settled snapshots through `recordSwarmRun` internally,
+                // replacing the duplicate `onDispose → recordSwarmRun` path
+                // removed in this revision.
+                emitSwarmSnapshot: (snapshot) => this.session?.emitSwarmSnapshot(snapshot),
               },
               log: this.session.log,
             },
             abortController,
-            // Hand the lifecycle summary back to the session so callers
-            // and downstream tooling can inspect recent swarm runs without
-            // replaying the orchestration event stream. Capture
-            // `this.session` in a local — the closure runs from `dispose()`
-            // which fires inside the `finally` block, so the field is still
-            // set.
-            (summary) => {
-              this.session?.recordSwarmRun(summary);
-            },
           )
         : null;
       // Pair `swarmMode.enter` and `swarmMode.exit` inside the same try/finally

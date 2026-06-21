@@ -91,6 +91,7 @@ type MockSessionHandle = {
   log: { warn: ReturnType<typeof vi.fn> };
   recordSwarmRun: ReturnType<typeof vi.fn>;
   getSwarmRuns: ReturnType<typeof vi.fn>;
+  emitSwarmSnapshot: ReturnType<typeof vi.fn>;
 };
 
 function mockSession(): MockSessionHandle & ConstructorParameters<typeof AgentSwarmTool>[2] {
@@ -128,6 +129,11 @@ function mockSession(): MockSessionHandle & ConstructorParameters<typeof AgentSw
     // its result. Provide no-op implementations so the tool can finish.
     recordSwarmRun: vi.fn(),
     getSwarmRuns: vi.fn(() => []),
+    // Phase 10: SwarmCoordinator calls `session.emitSwarmSnapshot` on every
+    // member transition and on dispose (with `completedAt` set); Session
+    // routes the final snapshot through `recordSwarmRun` internally. Mock
+    // the entry point so the coordinator can dispatch without throwing.
+    emitSwarmSnapshot: vi.fn(),
   } as unknown as MockSessionHandle & ConstructorParameters<typeof AgentSwarmTool>[2];
 }
 

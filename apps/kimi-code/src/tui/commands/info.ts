@@ -198,7 +198,8 @@ async function loadManagedUsageReport(host: SlashCommandHost): Promise<ManagedUs
  */
 export async function showDiagReport(host: SlashCommandHost): Promise<void> {
   const orchestrator = host.state.appState.statusSnapshot?.orchestrator;
-  const swarmRuns: readonly never[] = [];
+  const session = host.requireSession?.();
+  const swarmRuns = session?.getSwarmRunHistory?.() ?? [];
   const lines = buildDiagReportLines({ orchestrator, swarmRuns });
   const panel = new UsagePanelComponent(() => lines, 'primary', ' Diagnostics ');
   host.state.transcriptContainer.addChild(panel);

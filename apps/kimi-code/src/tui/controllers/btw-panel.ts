@@ -144,6 +144,7 @@ export class BtwPanelController {
       case "subagent.spawned":
       case "subagent.started":
       case "subagent.suspended":
+      case "swarm.run.snapshot":
       case "tool.call.delta":
       case "tool.call.started":
       case "tool.list.updated":

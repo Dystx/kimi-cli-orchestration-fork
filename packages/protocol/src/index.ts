@@ -6,6 +6,7 @@ export * from './request-id';
 export * from './events';
 export * from './display';
 export * from './ws-control';
+export * from './swarm';
 
 export * from './session';
 export * from './workspace';

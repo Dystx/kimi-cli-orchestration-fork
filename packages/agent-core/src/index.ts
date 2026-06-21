@@ -35,6 +35,19 @@ export type {
   PromptOrigin,
   UserPromptOrigin,
 } from './agent/context';
+
+// ─── Live swarm-run snapshot types (re-exported from protocol) ───────────
+// Consumers (node-sdk, kimi-code TUI) can import these without reaching
+// into `@moonshot-ai/protocol` directly. The agent-core `Session` class
+// emits the corresponding `swarm.run.snapshot` event when a swarm run
+// transitions between states.
+export type {
+  SwarmMemberSnapshot,
+  SwarmMemberStatus,
+  SwarmRunSnapshot,
+  SwarmRunTotals,
+} from '@moonshot-ai/protocol';
+export type { SwarmRunSnapshotEvent } from '@moonshot-ai/protocol';
 export type {
   AgentBackgroundTaskInfo,
   BackgroundTaskInfo,

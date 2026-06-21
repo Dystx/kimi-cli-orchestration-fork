@@ -1,4 +1,5 @@
 import type { ToolInputDisplay } from './display';
+import type { SwarmRunSnapshot } from './swarm';
 
 export interface TokenUsage {
   readonly inputOther: number;
@@ -514,6 +515,11 @@ export interface CronFiredEvent {
   readonly prompt: string;
 }
 
+export interface SwarmRunSnapshotEvent {
+  readonly type: 'swarm.run.snapshot';
+  readonly snapshot: SwarmRunSnapshot;
+}
+
 export type ToolListUpdatedReason = 'mcp.connected' | 'mcp.disconnected' | 'mcp.failed';
 
 export interface ToolListUpdatedEvent {
@@ -645,6 +651,7 @@ export type AgentEvent =
   | CompactionCompletedEvent
   | BackgroundTaskStartedEvent
   | BackgroundTaskTerminatedEvent
-  | CronFiredEvent;
+  | CronFiredEvent
+  | SwarmRunSnapshotEvent;
 
 export type Event = AgentEvent & { agentId: string; sessionId: string };
