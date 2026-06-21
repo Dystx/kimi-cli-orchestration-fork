@@ -65,7 +65,7 @@ describe('SwarmCoordinator emits snapshots on every member state change', () => 
     const c = new SwarmCoordinator('run-y', agent as never, new AbortController(), () => {});
     c.registerMember('a', spec('a'));
     fireEvent(agent, 'subagent.started', { subagentId: 'a' });
-    fireEvent(agent, 'subagent.completed', { subagentId: 'a', result: 'ok' });
+    fireEvent(agent, 'subagent.completed', { subagentId: 'a', payload: { resultSummary: 'ok' } });
     const lastSnap = agent.session.emitSwarmSnapshot.mock.calls.at(-1)![0] as SwarmRunSnapshot;
     expect(lastSnap.totals.completed).toBe(1);
     expect(lastSnap.totals.running).toBe(0);
@@ -77,7 +77,7 @@ describe('SwarmCoordinator emits snapshots on every member state change', () => 
     c.registerMember('a', spec('a'));
     c.registerMember('b', spec('b'));
     fireEvent(agent, 'subagent.started', { subagentId: 'a' });
-    fireEvent(agent, 'subagent.completed', { subagentId: 'a', result: 'ok' });
+    fireEvent(agent, 'subagent.completed', { subagentId: 'a', payload: { resultSummary: 'ok' } });
     c.dispose();
     const finalSnap = agent.session.emitSwarmSnapshot.mock.calls.at(-1)![0] as SwarmRunSnapshot;
     expect(finalSnap.completedAt).toBeTypeOf('number');
