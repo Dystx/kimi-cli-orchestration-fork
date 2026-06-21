@@ -11,6 +11,7 @@ import { ErrorCodes, type KimiErrorPayload } from '../errors';
 import { DenyAllPermissionPolicy } from '../agent/permission/policies/deny-all';
 import { InMemoryAgentRecordPersistence } from '../agent/records';
 import { isAbortError } from '../loop/errors';
+import type { SDKAgentRPC } from '../rpc/sdk-api';
 import {
   DEFAULT_AGENT_PROFILES,
   prepareSystemPromptContext,
@@ -22,6 +23,7 @@ import {
 } from '../utils/abort';
 import { collectGitContext } from './git-context';
 import type { Session } from './index';
+import type { OrchestrationHooks } from './orchestration-hooks';
 import {
   SubagentBatch,
   type SubagentResult,
@@ -101,6 +103,15 @@ type SubagentCompletion = {
 type ActiveChild = {
   readonly controller: AbortController;
   readonly runInBackground: boolean;
+  /**
+   * Handle returned by `attachChildToolEventBridge` for the child's tool
+   * event subscription. Lifecycle handlers invoke this in the `finally`
+   * block of `runWithActiveChild` so we never leak a listener past the
+   * child's terminal status. The field is mutable because the bridge is
+   * attached inside the spawn `run` callback, after the active entry has
+   * already been created.
+   */
+  unsubscribeToolEventBridge?: () => void;
 };
 
 export type SubagentStatus =
@@ -166,6 +177,22 @@ export class SessionSubagentHost {
             worktree: worktreePath !== undefined,
           },
         });
+        // Phase 12: bridge the child's tool events into the session's
+        // orchestrationHooks stamped with `subagentId`. `agent.rpc` is
+        // the per-agent proxy produced by `proxyWithExtraPayload`; the
+        // runtime preserves `onEvent` as a direct callable across the
+        // proxy layers (see `SDKAgentSubscriptions` in
+        // `packages/agent-core/src/rpc/sdk-api.ts`), so subscribing here
+        // fires in production as well as in the mock-backed unit test
+        // (`subagent-host-tool-events.test.ts`).
+        const entry = this.activeChildren.get(id);
+        if (entry !== undefined && this.session.orchestrationHooks !== undefined) {
+          entry.unsubscribeToolEventBridge = this.attachChildToolEventBridge(
+            id,
+            agent.rpc,
+            this.session.orchestrationHooks,
+          );
+        }
         return await this.runPromptTurn(parent, id, agent, profile.name, runOptions);
       } catch (error) {
         this.emitSubagentFailed(parent, id, profile.name, runOptions, error);
@@ -330,6 +357,49 @@ export class SessionSubagentHost {
     return metadata.swarmItem;
   }
 
+  /**
+   * Subscribe to a child agent's RPC event stream and re-emit tool events
+   * (`tool.call.started`, `tool.result`) through the given
+   * `orchestrationHooks`, stamped with `subagentId`. Non-tool events are not
+   * re-emitted — lifecycle events are handled separately by this host.
+   *
+   * Returns an unsubscribe function. Callers must invoke it when the child
+   * completes (or when the host is disposed) to avoid leaks. Subscriber
+   * exceptions are caught and logged so a faulty hook cannot poison the
+   * host's other listeners.
+   */
+  attachChildToolEventBridge(
+    subagentId: string,
+    childRpc: Partial<SDKAgentRPC> | undefined,
+    orchestrationHooks: OrchestrationHooks,
+  ): () => void {
+    // `AgentOptions.rpc` is typed as `Partial<SDKAgentRPC>` so tests
+    // can omit it entirely. In production the proxy is always present
+    // (Session.instantiateAgent wires `proxyWithExtraPayload` into
+    // every spawned agent), but the type permits absence — guard here
+    // so the bridge is a no-op when `onEvent` is not implemented.
+    const onEvent = childRpc?.onEvent;
+    if (typeof onEvent !== 'function') {
+      return (): void => {};
+    }
+    return onEvent((event: unknown) => {
+      const e = event as { type?: unknown } & Record<string, unknown>;
+      const type = typeof e?.type === 'string' ? e.type : undefined;
+      if (type !== 'tool.call.started' && type !== 'tool.result') return;
+      const { type: _omit, ...rest } = e;
+      void _omit;
+      try {
+        orchestrationHooks.emit({
+          type,
+          payload: { subagentId, ...rest },
+        } as unknown as Parameters<OrchestrationHooks['emit']>[0]);
+      } catch (error) {
+        // oxlint-disable-next-line no-console
+        console.warn('subagent-host tool event bridge failed', error);
+      }
+    });
+  }
+
   private resolveProfile(parent: Agent, profileName: string): ResolvedAgentProfile {
     const profile =
       DEFAULT_AGENT_PROFILES[parent.config.profileName ?? 'agent']?.subagents?.[profileName] ??
@@ -354,6 +424,8 @@ export class SessionSubagentHost {
 
     return run({ ...options, signal: controller.signal }).finally(() => {
       unlinkAbortSignal();
+      const entry = this.activeChildren.get(childId);
+      entry?.unsubscribeToolEventBridge?.();
       this.activeChildren.delete(childId);
     });
   }
@@ -725,6 +797,14 @@ function checkBudgets(
     }
   }
 }
+
+/**
+ * Alias for {@link SessionSubagentHost} preserved for the existing
+ * `subagent-host-tool-events` tests and any external callers that import
+ * the shorter name. Both names refer to the same class.
+ */
+export const SubagentHost = SessionSubagentHost;
+export type SubagentHost = SessionSubagentHost;
 
 function providerRateLimitErrorFromPayload(error: KimiErrorPayload): APIProviderRateLimitError {
   const requestId =

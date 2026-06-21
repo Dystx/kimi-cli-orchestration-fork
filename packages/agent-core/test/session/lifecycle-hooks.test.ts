@@ -384,6 +384,7 @@ function createSessionRpc(overrides: Partial<SDKSessionRPC> = {}): SDKSessionRPC
       output: 'custom tools are not supported in this test',
       isError: true,
     })),
+    onEvent: vi.fn(() => () => {}),
     ...overrides,
   } as SDKSessionRPC;
 }

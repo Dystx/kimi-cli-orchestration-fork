@@ -18,9 +18,21 @@ type RpcResponse =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly error: KimiErrorPayload };
 
+/**
+ * RPC-shaped view of `T`. Each function-valued property is widened to
+ * `(payload, options?) => Promise<Return>` so the simulated wire layer
+ * can serialize the call. Subscription-style methods — those whose
+ * return type is itself a function (e.g. `() => void`) — are passed
+ * through untouched: they carry live function references (listener +
+ * unsubscribe) that cannot survive JSON serialization, and the runtime
+ * path through `createRPC` short-circuits them (see
+ * `proxyWithExtraPayload` for the same handling on the proxy side).
+ */
 export type RPCMethods<T> = {
   [K in keyof T]: T[K] extends (payload: infer Payload) => infer Return
-    ? (payload: Payload, options?: RPCCallOptions) => Promisify<Return>
+    ? Return extends (...args: any[]) => any
+      ? T[K]
+      : (payload: Payload, options?: RPCCallOptions) => Promisify<Return>
     : never;
 };
 
@@ -91,12 +103,18 @@ export function createRPC<Left extends Record<string, any>, Right extends Record
 
   async function leftClient(self: PromisableMethods<Left>): Promise<RPCMethods<Right>> {
     left.resolve(bindAllFunctions(self));
-    return objectMap(await right, (key, fn) => [key, mapRpcFunction(fn)]) as RPCMethods<Right>;
+    return objectMap(await right, (key, fn) => [
+      key,
+      key === 'onEvent' ? fn : mapRpcFunction(fn),
+    ]) as RPCMethods<Right>;
   }
 
   async function rightClient(self: PromisableMethods<Right>): Promise<RPCMethods<Left>> {
     right.resolve(bindAllFunctions(self));
-    return objectMap(await left, (key, fn) => [key, mapRpcFunction(fn)]) as RPCMethods<Left>;
+    return objectMap(await left, (key, fn) => [
+      key,
+      key === 'onEvent' ? fn : mapRpcFunction(fn),
+    ]) as RPCMethods<Left>;
   }
 
   return [leftClient, rightClient];
