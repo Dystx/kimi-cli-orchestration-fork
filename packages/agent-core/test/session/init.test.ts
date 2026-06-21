@@ -704,6 +704,7 @@ function createSessionRpc(events: Array<Record<string, unknown>>): SDKSessionRPC
       output: 'custom tools are not supported in this test',
       isError: true,
     })),
+    onEvent: vi.fn(() => () => {}),
   } as SDKSessionRPC;
 }
 

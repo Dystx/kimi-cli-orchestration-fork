@@ -11,6 +11,7 @@ import { ErrorCodes, type KimiErrorPayload } from '../errors';
 import { DenyAllPermissionPolicy } from '../agent/permission/policies/deny-all';
 import { InMemoryAgentRecordPersistence } from '../agent/records';
 import { isAbortError } from '../loop/errors';
+import type { SDKAgentRPC } from '../rpc/sdk-api';
 import {
   DEFAULT_AGENT_PROFILES,
   prepareSystemPromptContext,
@@ -31,17 +32,6 @@ import {
 } from './subagent-batch';
 import SUMMARY_CONTINUATION_PROMPT from './summary-continuation.md?raw';
 import { createWorktree, removeWorktree } from './worktree';
-
-/**
- * Minimal shape required by `attachChildToolEventBridge`. Production agents
- * expose this capability via the per-agent RPC channel; tests inject a mock
- * with the same surface. Declared locally so the bridge doesn't have to
- * depend on the consumer-side SDK RPC base (which lives in `@moonshot-ai/
- * node-sdk`, a separate package).
- */
-export interface ChildRpcEventStream {
-  onEvent(listener: (event: unknown) => unknown): () => void;
-}
 
 export const DEFAULT_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1000;
 export const DEFAULT_SUBAGENT_TIMEOUT_DESCRIPTION = '30 minutes';
@@ -188,23 +178,20 @@ export class SessionSubagentHost {
           },
         });
         // Phase 12: bridge the child's tool events into the session's
-        // orchestrationHooks stamped with `subagentId`. The host's
-        // `child.rpc` shape is the proxied session RPC; for production
-        // wiring to actually deliver events, the proxy must also expose
-        // an `onEvent` subscription (a future task). The bridge itself is
-        // exercised by `subagent-host-tool-events.test.ts` via a mock.
-        if (this.session.orchestrationHooks !== undefined) {
-          const childRpc = agent.rpc as unknown as ChildRpcEventStream | undefined;
-          if (childRpc !== undefined && typeof childRpc.onEvent === 'function') {
-            const entry = this.activeChildren.get(id);
-            if (entry !== undefined) {
-              entry.unsubscribeToolEventBridge = this.attachChildToolEventBridge(
-                id,
-                childRpc,
-                this.session.orchestrationHooks,
-              );
-            }
-          }
+        // orchestrationHooks stamped with `subagentId`. `agent.rpc` is
+        // the per-agent proxy produced by `proxyWithExtraPayload`; the
+        // runtime preserves `onEvent` as a direct callable across the
+        // proxy layers (see `SDKAgentSubscriptions` in
+        // `packages/agent-core/src/rpc/sdk-api.ts`), so subscribing here
+        // fires in production as well as in the mock-backed unit test
+        // (`subagent-host-tool-events.test.ts`).
+        const entry = this.activeChildren.get(id);
+        if (entry !== undefined && this.session.orchestrationHooks !== undefined) {
+          entry.unsubscribeToolEventBridge = this.attachChildToolEventBridge(
+            id,
+            agent.rpc,
+            this.session.orchestrationHooks,
+          );
         }
         return await this.runPromptTurn(parent, id, agent, profile.name, runOptions);
       } catch (error) {
@@ -383,10 +370,19 @@ export class SessionSubagentHost {
    */
   attachChildToolEventBridge(
     subagentId: string,
-    childRpc: ChildRpcEventStream,
+    childRpc: Partial<SDKAgentRPC> | undefined,
     orchestrationHooks: OrchestrationHooks,
   ): () => void {
-    return childRpc.onEvent((event: unknown) => {
+    // `AgentOptions.rpc` is typed as `Partial<SDKAgentRPC>` so tests
+    // can omit it entirely. In production the proxy is always present
+    // (Session.instantiateAgent wires `proxyWithExtraPayload` into
+    // every spawned agent), but the type permits absence — guard here
+    // so the bridge is a no-op when `onEvent` is not implemented.
+    const onEvent = childRpc?.onEvent;
+    if (typeof onEvent !== 'function') {
+      return (): void => {};
+    }
+    return onEvent((event: unknown) => {
       const e = event as { type?: unknown } & Record<string, unknown>;
       const type = typeof e?.type === 'string' ? e.type : undefined;
       if (type !== 'tool.call.started' && type !== 'tool.result') return;

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { SessionSubagentHost } from '../../src/session/subagent-host';
 import type { OrchestrationHooks } from '../../src/session/orchestration-hooks';
+import type { SDKAgentRPC } from '../../src/rpc';
 
 function makeChildRpc() {
   const subscribers: Array<(event: unknown) => void> = [];
@@ -47,7 +48,11 @@ describe('subagent-host tool event bridge', () => {
     const hooks = makeOrchestrationHooks();
     const host = new SessionSubagentHost(makeSession(), 'main');
     const childRpc = makeChildRpc();
-    const unsubscribe = host.attachChildToolEventBridge('child-1', childRpc, hooks);
+    const unsubscribe = host.attachChildToolEventBridge(
+      'child-1',
+      childRpc as unknown as Partial<SDKAgentRPC>,
+      hooks,
+    );
     childRpc.emit({
       type: 'tool.call.started',
       toolName: 'read_file',
@@ -65,7 +70,11 @@ describe('subagent-host tool event bridge', () => {
     const hooks = makeOrchestrationHooks();
     const host = new SessionSubagentHost(makeSession(), 'main');
     const childRpc = makeChildRpc();
-    const unsubscribe = host.attachChildToolEventBridge('child-2', childRpc, hooks);
+    const unsubscribe = host.attachChildToolEventBridge(
+      'child-2',
+      childRpc as unknown as Partial<SDKAgentRPC>,
+      hooks,
+    );
     childRpc.emit({ type: 'tool.result', toolCallId: 'tc-1' });
     expect(hooks.emitted[0]?.payload?.['subagentId']).toBe('child-2');
     unsubscribe();
@@ -75,7 +84,11 @@ describe('subagent-host tool event bridge', () => {
     const hooks = makeOrchestrationHooks();
     const host = new SessionSubagentHost(makeSession(), 'main');
     const childRpc = makeChildRpc();
-    const unsubscribe = host.attachChildToolEventBridge('child-3', childRpc, hooks);
+    const unsubscribe = host.attachChildToolEventBridge(
+      'child-3',
+      childRpc as unknown as Partial<SDKAgentRPC>,
+      hooks,
+    );
     childRpc.emit({ type: 'assistant.delta', delta: 'hello' });
     childRpc.emit({ type: 'thinking.delta', delta: '...' });
     expect(hooks.emitted).toHaveLength(0);
@@ -86,7 +99,11 @@ describe('subagent-host tool event bridge', () => {
     const hooks = makeOrchestrationHooks();
     const host = new SessionSubagentHost(makeSession(), 'main');
     const childRpc = makeChildRpc();
-    const unsubscribe = host.attachChildToolEventBridge('child-4', childRpc, hooks);
+    const unsubscribe = host.attachChildToolEventBridge(
+      'child-4',
+      childRpc as unknown as Partial<SDKAgentRPC>,
+      hooks,
+    );
     childRpc.emit({ type: 'tool.call.started', toolName: 'shell' });
     expect(hooks.emitted).toHaveLength(1);
     unsubscribe();

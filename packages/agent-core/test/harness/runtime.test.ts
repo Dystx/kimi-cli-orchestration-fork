@@ -165,6 +165,7 @@ micro_compaction = false
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({
@@ -235,6 +236,7 @@ custom_headers = { "X-Test" = "1" }
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({ id: 'ses_runtime_service_oauth', workDir });
@@ -286,6 +288,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({ id: 'ses_runtime_default_model', workDir });
@@ -310,6 +313,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
     setCoreKaos(
       core,
@@ -343,6 +347,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
     setCoreKaos(core, Promise.resolve(testKaos));
     const created = await rpc.createSession({
@@ -380,6 +385,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({
@@ -422,6 +428,7 @@ base_url = "https://search.example.test/v1"
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({

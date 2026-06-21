@@ -674,6 +674,19 @@ export class ClientAPI implements SDKAPI {
     this.client.receiveEvent(event);
   }
 
+  /**
+   * Subscribe to the session's event stream. The runtime preserves the
+   * listener reference and returns the unsubscribe function directly
+   * (no JSON round-trip, no Promise wrapping) — see `createRPC` /
+   * `proxyWithExtraPayload` short-circuit handling for `onEvent`.
+   * The bridge in `subagent-host` (Phase 12) calls the returned
+   * unsubscribe synchronously when the child terminates, so the
+   * function must be reachable as a direct callable.
+   */
+  onEvent(listener: (event: Event) => void): Unsubscribe {
+    return this.client.onEvent(listener);
+  }
+
   requestApproval(
     request: ApprovalRequest & { sessionId: string; agentId: string },
   ): Promise<ApprovalResponse> {
