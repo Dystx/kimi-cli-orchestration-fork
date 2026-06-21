@@ -872,6 +872,17 @@ export class AgentTestContext {
               return;
             }
 
+            // Mirror `SDKRpcClientBase.onEvent`: return a no-op unsubscribe
+            // function instead of a promise. Subagent-host (Phase 12)
+            // subscribes to a child's RPC event stream via this method, and
+            // the bridge expects a callable handle it can invoke from its
+            // lifecycle teardown. Treating `onEvent` like any other RPC call
+            // would have the bridge try to invoke a Promise.
+            if (property === 'onEvent') {
+              this.recordRpc(property, payload);
+              return (): void => {};
+            }
+
             const promise = this.createRpcPromise(options?.signal);
             void promise.catch(() => {});
             this.recordRpc(property, payload, promise);
