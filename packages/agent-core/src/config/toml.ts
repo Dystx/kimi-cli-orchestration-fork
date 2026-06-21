@@ -13,6 +13,7 @@ import {
   type HookDefConfig,
   type KimiConfig,
   type LoopControl,
+  type MiniMaxServiceConfig,
   type ModelAlias,
   type MoonshotServiceConfig,
   type OAuthRef,
@@ -607,6 +608,16 @@ function servicesToToml(services: ServicesConfig, rawServices: unknown): Record<
   } else {
     delete out['moonshot_fetch'];
   }
+  if (services.minimaxSearch !== undefined) {
+    out['minimax_search'] = minimaxServiceToToml(services.minimaxSearch);
+  } else {
+    delete out['minimax_search'];
+  }
+  if (services.minimaxImageSearch !== undefined) {
+    out['minimax_image_search'] = minimaxServiceToToml(services.minimaxImageSearch);
+  } else {
+    delete out['minimax_image_search'];
+  }
   return out;
 }
 
@@ -616,6 +627,18 @@ function serviceToToml(service: MoonshotServiceConfig): Record<string, unknown> 
     if (key === 'oauth' && value !== undefined) {
       out[camelToSnake(key)] = oauthToToml(value as OAuthRef);
     } else if (key === 'customHeaders' && value !== undefined) {
+      out[camelToSnake(key)] = cloneUnknown(value);
+    } else {
+      setDefined(out, camelToSnake(key), value);
+    }
+  }
+  return out;
+}
+
+function minimaxServiceToToml(service: MiniMaxServiceConfig): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(service)) {
+    if (key === 'customHeaders' && value !== undefined) {
       out[camelToSnake(key)] = cloneUnknown(value);
     } else {
       setDefined(out, camelToSnake(key), value);

@@ -27,6 +27,8 @@ tools:
   - MemoryDelete
   - Skill
   - WebSearch
+  - WebSearchMinimax
+  - WebSearchImages
   - Agent
   - AgentBatch
   - SubagentStatus

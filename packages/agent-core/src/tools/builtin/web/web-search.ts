@@ -16,6 +16,12 @@ import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-m
 import { ToolResultBuilder } from '../../support/result-builder';
 import DESCRIPTION from './web-search.md?raw';
 
+export const WEB_SEARCH_DESCRIPTION = DESCRIPTION;
+export const WEB_SEARCH_MINIMAX_DESCRIPTION =
+  "Search the web for information using the MiniMax search backend, routed through the local `mavis` CLI. Use this when you specifically want MiniMax's coverage rather than the default `WebSearch` (which chains Moonshot and MiniMax when both are configured). Each result includes its title, URL, snippet, and—when available—a publication date. When `include_content` is enabled, the full page content—when available—is appended after the snippet.";
+export const WEB_SEARCH_IMAGES_DESCRIPTION =
+  "Search the web for images matching a query. Returns a list of images with their title, image URL, source site, and the page that hosts the image. Useful when you need reference images, design inspiration, or visual material that the model itself cannot generate.";
+
 // ── Provider interface (host-injected) ───────────────────────────────
 
 export interface WebSearchResult {
@@ -31,6 +37,20 @@ export interface WebSearchProvider {
     query: string,
     options?: { limit?: number; includeContent?: boolean; toolCallId?: string },
   ): Promise<WebSearchResult[]>;
+}
+
+export interface ImageSearchResult {
+  title: string;
+  imageUrl: string;
+  source?: string | undefined;
+  link?: string | undefined;
+}
+
+export interface ImageSearchProvider {
+  search(
+    query: string,
+    options?: { limit?: number; prompt?: string; toolCallId?: string },
+  ): Promise<ImageSearchResult[]>;
 }
 
 // ── Input schema ─────────────────────────────────────────────────────
@@ -58,13 +78,41 @@ export const WebSearchInputSchema = z.object({
 
 export type WebSearchInput = z.Infer<typeof WebSearchInputSchema>;
 
+// ── WebSearchImagesTool schema ───────────────────────────────────────
+
+export const ImageSearchInputSchema = z.object({
+  query: z.string().describe('The image search query.'),
+  prompt: z
+    .string()
+    .describe(
+      'A relevance-filter prompt that describes what kind of images should match. If omitted, the query itself is used.',
+    )
+    .optional(),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(20)
+    .default(5)
+    .describe('Maximum number of images to return. Defaults to 5.')
+    .optional(),
+});
+
+export type ImageSearchInput = z.Infer<typeof ImageSearchInputSchema>;
+
 // ── Implementation ───────────────────────────────────────────────────
 
 export class WebSearchTool implements BuiltinTool<WebSearchInput> {
-  readonly name = 'WebSearch' as const;
-  readonly description: string = DESCRIPTION;
+  readonly name: string;
+  readonly description: string;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(WebSearchInputSchema);
-  constructor(private readonly provider: WebSearchProvider) {}
+  constructor(
+    private readonly provider: WebSearchProvider,
+    options?: { readonly name?: string; readonly description?: string },
+  ) {
+    this.name = options?.name ?? 'WebSearch';
+    this.description = options?.description ?? DESCRIPTION;
+  }
 
   resolveExecution(args: WebSearchInput): ToolExecution {
     const preview = args.query.length > 40 ? `${args.query.slice(0, 40)}…` : args.query;
@@ -119,6 +167,63 @@ export class WebSearchTool implements BuiltinTool<WebSearchInput> {
     }
   }
 
+}
+
+// ── WebSearchImagesTool ──────────────────────────────────────────────
+
+export class WebSearchImagesTool implements BuiltinTool<ImageSearchInput> {
+  readonly name = 'WebSearchImages' as const;
+  readonly description: string = WEB_SEARCH_IMAGES_DESCRIPTION;
+  readonly parameters: Record<string, unknown> = toInputJsonSchema(ImageSearchInputSchema);
+  constructor(private readonly provider: ImageSearchProvider) {}
+
+  resolveExecution(args: ImageSearchInput): ToolExecution {
+    const preview = args.query.length > 40 ? `${args.query.slice(0, 40)}…` : args.query;
+    return {
+      accesses: ToolAccesses.none(),
+      description: `Image search: ${preview}`,
+      display: { kind: 'search', query: args.query },
+      approvalRule: literalRulePattern(this.name, args.query),
+      matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, args.query),
+      execute: (ctx) => this.execution(args, ctx),
+    };
+  }
+
+  private async execution(
+    args: ImageSearchInput,
+    { toolCallId }: ExecutableToolContext,
+  ): Promise<ExecutableToolResult> {
+    try {
+      const opts: { limit?: number; prompt?: string; toolCallId?: string } = {
+        toolCallId,
+      };
+      if (args.limit !== undefined) opts.limit = args.limit;
+      if (args.prompt !== undefined && args.prompt.length > 0) opts.prompt = args.prompt;
+      const results = await this.provider.search(args.query, opts);
+      const builder = new ToolResultBuilder({ maxLineLength: null });
+
+      if (results.length === 0) {
+        builder.write('No image results found.');
+        return builder.ok();
+      }
+
+      let first = true;
+      for (const result of results) {
+        if (!first) builder.write('---\n\n');
+        first = false;
+        builder.write(`Title: ${result.title}\n`);
+        builder.write(`Image URL: ${result.imageUrl}\n`);
+        if (result.source) builder.write(`Source: ${result.source}\n`);
+        if (result.link) builder.write(`Page: ${result.link}\n\n`);
+      }
+      return builder.ok();
+    } catch (error) {
+      return {
+        isError: true,
+        output: classifySearchError(error),
+      };
+    }
+  }
 }
 
 // ── Error classification ─────────────────────────────────────────────

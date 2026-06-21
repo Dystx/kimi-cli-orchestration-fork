@@ -129,9 +129,32 @@ export const MoonshotServiceConfigSchema = z.object({
 
 export type MoonshotServiceConfig = z.infer<typeof MoonshotServiceConfigSchema>;
 
+export const MiniMaxServiceConfigSchema = z.object({
+  /**
+   * Override the path to the `mavis` CLI that exposes matrix MCP
+   * commands. Defaults to `/Users/cheng/.mavis/bin/mavis` (macOS install).
+   */
+  cliPath: z.string().optional(),
+  /**
+   * @deprecated The MiniMax search endpoint is reached through the
+   * `mavis` CLI / matrix MCP, which the mavis daemon already
+   * authenticates. These HTTP-style fields are reserved for a future
+   * direct-HTTP backend and are currently ignored by the provider.
+   */
+  baseUrl: z.string().optional(),
+  /** @deprecated See `baseUrl`. */
+  apiKey: z.string().optional(),
+  /** @deprecated See `baseUrl`. */
+  customHeaders: StringRecordSchema.optional(),
+});
+
+export type MiniMaxServiceConfig = z.infer<typeof MiniMaxServiceConfigSchema>;
+
 export const ServicesConfigSchema = z.object({
   moonshotSearch: MoonshotServiceConfigSchema.optional(),
   moonshotFetch: MoonshotServiceConfigSchema.optional(),
+  minimaxSearch: MiniMaxServiceConfigSchema.optional(),
+  minimaxImageSearch: MiniMaxServiceConfigSchema.optional(),
 });
 
 export type ServicesConfig = z.infer<typeof ServicesConfigSchema>;
@@ -241,9 +264,12 @@ const BackgroundConfigPatchSchema = BackgroundConfigSchema.partial();
 const OrchestrationConfigPatchSchema = OrchestrationConfigSchema.partial();
 const ExperimentalConfigPatchSchema = ExperimentalConfigSchema;
 const MoonshotServiceConfigPatchSchema = MoonshotServiceConfigSchema.partial();
+const MiniMaxServiceConfigPatchSchema = MiniMaxServiceConfigSchema.partial();
 const ServicesConfigPatchSchema = z.object({
   moonshotSearch: MoonshotServiceConfigPatchSchema.optional(),
   moonshotFetch: MoonshotServiceConfigPatchSchema.optional(),
+  minimaxSearch: MiniMaxServiceConfigPatchSchema.optional(),
+  minimaxImageSearch: MiniMaxServiceConfigPatchSchema.optional(),
 });
 
 export const KimiConfigPatchSchema = z

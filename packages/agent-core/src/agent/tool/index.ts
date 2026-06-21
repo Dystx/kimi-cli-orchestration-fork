@@ -480,6 +480,14 @@ export class ToolManager {
         this.agent.fileLock &&
           new b.ListLocksTool(this.agent.fileLock, this.agent.homedir ? basename(this.agent.homedir) : this.agent.type),
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
+        ...(toolServices?.extraWebSearchers ?? []).map(
+          (extra) =>
+            new b.WebSearchTool(extra.provider, {
+              name: extra.name,
+              description: extra.description,
+            }),
+        ),
+        toolServices?.imageSearcher && new b.WebSearchImagesTool(toolServices.imageSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
         new b.BuildCodeIndexTool(kaos),
         new b.QueryCodeIndexTool(kaos),

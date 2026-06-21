@@ -9,6 +9,11 @@ import { PluginManager } from '#/plugin';
 import { LocalFetchURLProvider } from '#/tools/providers/local-fetch-url';
 import { MoonshotFetchURLProvider } from '#/tools/providers/moonshot-fetch-url';
 import { MoonshotWebSearchProvider } from '#/tools/providers/moonshot-web-search';
+import { ChainedWebSearchProvider } from '#/tools/providers/chained-web-search';
+import { MiniMaxImageSearchProvider } from '#/tools/providers/minimax-image-search';
+import { MiniMaxWebSearchProvider } from '#/tools/providers/minimax-web-search';
+import type { WebSearchProvider } from '#/tools/builtin/web/web-search';
+import { WEB_SEARCH_MINIMAX_DESCRIPTION } from '#/tools/builtin/web/web-search';
 import type { PromisableMethods } from '#/utils/types';
 import { getCoreVersion } from '#/version';
 import { resolveThinkingLevel } from '../agent/config/thinking';
@@ -1015,6 +1020,61 @@ async function createRuntimeConfig(input: {
   const localFetcher = new LocalFetchURLProvider();
   const searchService = input.config.services?.moonshotSearch;
   const fetchService = input.config.services?.moonshotFetch;
+  const minimaxSearchService = input.config.services?.minimaxSearch;
+
+  // Build every backend that the user has configured so the default
+  // `WebSearch` tool can chain them as a fallback while a dedicated
+  // `WebSearchMinimax` tool is also exposed when MiniMax is present.
+  const moonshotWebSearcher =
+    searchService?.baseUrl === undefined
+      ? undefined
+      : new MoonshotWebSearchProvider({
+          baseUrl: searchService.baseUrl,
+          defaultHeaders: input.kimiRequestHeaders,
+          ...serviceCredentials(searchService, input.resolveOAuthTokenProvider),
+        });
+
+  const minimaxConfigured = minimaxSearchService !== undefined;
+  const minimaxWebSearcher = minimaxConfigured
+    ? new MiniMaxWebSearchProvider({
+        cliPath: minimaxSearchService?.cliPath,
+      })
+    : undefined;
+
+  const minimaxImageSearchService = input.config.services?.minimaxImageSearch;
+  const imageSearcher =
+    minimaxImageSearchService !== undefined
+      ? new MiniMaxImageSearchProvider({
+          cliPath: minimaxImageSearchService.cliPath,
+        })
+      : undefined;
+
+  const chain: { provider: WebSearchProvider; name: string }[] = [];
+  if (moonshotWebSearcher !== undefined) {
+    chain.push({ provider: moonshotWebSearcher, name: 'moonshot' });
+  }
+  if (minimaxWebSearcher !== undefined) {
+    chain.push({ provider: minimaxWebSearcher, name: 'minimax' });
+  }
+
+  const webSearcher: WebSearchProvider | undefined =
+    chain.length === 0
+      ? undefined
+      : chain.length === 1
+        ? chain[0]!.provider
+        : new ChainedWebSearchProvider(chain);
+
+  const extraWebSearchers: { name: string; provider: WebSearchProvider; description: string }[] = [];
+  if (minimaxWebSearcher !== undefined && moonshotWebSearcher !== undefined) {
+    // Only expose the dedicated `WebSearchMinimax` tool when more than one
+    // backend is configured; otherwise the model would have two tools doing
+    // the same thing.
+    extraWebSearchers.push({
+      name: 'WebSearchMinimax',
+      provider: minimaxWebSearcher,
+      description: WEB_SEARCH_MINIMAX_DESCRIPTION,
+    });
+  }
 
   return {
     urlFetcher:
@@ -1026,14 +1086,9 @@ async function createRuntimeConfig(input: {
             defaultHeaders: input.kimiRequestHeaders,
             ...serviceCredentials(fetchService, input.resolveOAuthTokenProvider),
           }),
-    webSearcher:
-      searchService?.baseUrl === undefined
-        ? undefined
-        : new MoonshotWebSearchProvider({
-            baseUrl: searchService.baseUrl,
-            defaultHeaders: input.kimiRequestHeaders,
-            ...serviceCredentials(searchService, input.resolveOAuthTokenProvider),
-          }),
+    ...(webSearcher !== undefined ? { webSearcher } : {}),
+    ...(extraWebSearchers.length > 0 ? { extraWebSearchers } : {}),
+    ...(imageSearcher !== undefined ? { imageSearcher } : {}),
   };
 }
 
