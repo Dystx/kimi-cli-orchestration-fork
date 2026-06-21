@@ -184,6 +184,26 @@ export function buildStatusReportLines(options: StatusReportOptions): string[] {
     if (snap.hooks > 0) {
       activityRows.push({ label: 'Hooks', value: String(snap.hooks) });
     }
+    if (snap.orchestrator !== undefined) {
+      activityRows.push({ label: '— Orchestrator —', value: '' });
+      for (const policy of snap.orchestrator.policies) {
+        const status = policy.lastError !== undefined ? '✗' : '✓';
+        const lastFired =
+          policy.lastFiredAt !== undefined
+            ? new Date(policy.lastFiredAt).toISOString().slice(11, 19)
+            : '—';
+        activityRows.push({
+          label: `${policy.name} (${policy.fireCount} fires)`,
+          value: `${status} last: ${lastFired}${
+            policy.lastError !== undefined ? ` err: ${policy.lastError.message.slice(0, 40)}` : ''
+          }`,
+        });
+      }
+      activityRows.push({
+        label: `${snap.orchestrator.policies.length} policies`,
+        value: `${snap.orchestrator.totals.injections} injections ${snap.orchestrator.totals.errors} errors`,
+      });
+    }
     addFieldRows(lines, activityRows, muted, value, errorStyle);
   }
 
