@@ -1,5 +1,7 @@
-import type { AgentSwarmSpec } from '../../tools/builtin/collaboration/agent-swarm';
+import type { OrchestrationEvent } from '../../session/orchestration/types';
+import type { SwarmRunSummary } from '../../session';
 import type { SubagentResult } from '../../session/subagent-batch';
+import type { AgentSwarmSpec } from '../../tools/builtin/collaboration/agent-swarm';
 
 export type SwarmMemberStatus =
   | 'spawned'
@@ -51,13 +53,18 @@ export class SwarmCoordinator {
       reject: (error: unknown) => void;
     }
   >();
+  private readonly diagnosticState = new Map<string, { lastError?: unknown }>();
   private disposed = false;
+  private readonly startedAt: number;
+  private readonly onDispose?: (summary: SwarmRunSummary) => void;
 
   constructor(
     runId: string,
     private readonly agent: {
       session: {
-        orchestrationHooks: { on(event: string, handler: (e: unknown) => void): () => void };
+        orchestrationHooks: {
+          on(event: string, handler: (e: OrchestrationEvent) => void): () => void;
+        };
         subagentHost: {
           spawn(options: unknown): Promise<{ subagentId: string }>;
         };
@@ -65,8 +72,11 @@ export class SwarmCoordinator {
       log: { warn(msg: string, meta?: unknown): void };
     },
     private readonly abortController: AbortController,
+    onDispose?: (summary: SwarmRunSummary) => void,
   ) {
     this.runId = runId;
+    this.startedAt = Date.now();
+    this.onDispose = onDispose;
     this.subscribe();
   }
 
@@ -96,10 +106,8 @@ export class SwarmCoordinator {
 
   subscribe(): void {
     if (this.disposed) return;
-    const hooks = this.agent.session.orchestrationHooks as unknown as {
-      on(event: string, handler: (e: unknown) => void): () => void;
-    };
-    const off = (event: string, handler: (e: unknown) => void) => {
+    const hooks = this.agent.session.orchestrationHooks;
+    const off = (event: string, handler: (e: OrchestrationEvent) => void) => {
       this.unsubscribers.push(hooks.on(event, handler));
     };
 
@@ -157,15 +165,22 @@ export class SwarmCoordinator {
       // legacy `AgentEvent` shape.
       const payload = (e as { payload?: { error?: unknown } }).payload;
       const err = payload?.error ?? (e as { error?: unknown }).error;
+      const errorInstance =
+        err instanceof Error ? err : new Error(typeof err === 'string' ? err : String(err));
       m.result = {
         task: { kind: 'spawn', spec: m.spec },
         agentId: m.agentId,
         status: 'failed',
-        error:
-          err instanceof Error
-            ? err
-            : new Error(typeof err === 'string' ? err : String(err)),
+        error: errorInstance,
       } as unknown as SubagentResult;
+      // Record the error so the dispose-time summary can surface it as
+      // `errorCount` independent of the member's terminal status. A future
+      // member could be retried into a non-failed state while still
+      // remembering that it once errored, and we want that history to be
+      // visible to callers inspecting `SwarmRunSummary.errorCount`.
+      const diag = this.diagnosticState.get(id) ?? {};
+      diag.lastError = errorInstance;
+      this.diagnosticState.set(id, diag);
       this.resolvePendingCompletions(id);
     });
   }
@@ -274,6 +289,28 @@ export class SwarmCoordinator {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+
+    // Compute the run summary before clearing state so the onDispose
+    // callback observes the same counts the coordinator held at settle
+    // time. We snapshot `members.size` first and then tally the terminal
+    // statuses; `errorCount` is sourced from `diagnosticState` so it
+    // tracks errors that surfaced even on members that were later
+    // retried into a non-failed terminal state.
+    const completedAt = Date.now();
+    const memberCount = this.members.size;
+    let cancelledCount = 0;
+    let failedCount = 0;
+    let completedCount = 0;
+    for (const m of this.members.values()) {
+      if (m.status === 'cancelled') cancelledCount += 1;
+      else if (m.status === 'failed') failedCount += 1;
+      else if (m.status === 'completed') completedCount += 1;
+    }
+    let errorCount = 0;
+    for (const diag of this.diagnosticState.values()) {
+      if (diag.lastError !== undefined) errorCount += 1;
+    }
+
     for (const [, pending] of this.pendingCompletions) {
       pending.reject(new Error('SwarmCoordinator disposed'));
     }
@@ -282,5 +319,16 @@ export class SwarmCoordinator {
     this.unsubscribers.length = 0;
     this.members.clear();
     this.retried.clear();
+
+    this.onDispose?.({
+      runId: this.runId,
+      startedAt: this.startedAt,
+      completedAt,
+      memberCount,
+      cancelledCount,
+      failedCount,
+      completedCount,
+      errorCount,
+    });
   }
 }

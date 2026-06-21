@@ -134,14 +134,7 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
               // field — the AgentSwarmTool already owns a `SessionSubagentHost`
               // instance so we hand it through.
               session: {
-                // SwarmCoordinator's structural type widens the handler to
-                // `(e: unknown) => void`; the real `OrchestrationHooks.on()`
-                // signature uses `(e: OrchestrationEvent) => void`. Narrow via
-                // an `unknown` cast — the coordinator itself does the same
-                // structural narrowing inside `subscribe()`.
-                orchestrationHooks: this.session.orchestrationHooks as unknown as {
-                  on(event: string, handler: (e: unknown) => void): () => void;
-                },
+                orchestrationHooks: this.session.orchestrationHooks,
                 // `SessionSubagentHost.spawn` returns `SubagentHandle` (with
                 // `agentId`); the coordinator's structural type expects
                 // `{ subagentId }`. Retry isn't wired in this revision, so we
@@ -156,6 +149,15 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
               log: this.session.log,
             },
             abortController,
+            // Hand the lifecycle summary back to the session so callers
+            // and downstream tooling can inspect recent swarm runs without
+            // replaying the orchestration event stream. Capture
+            // `this.session` in a local — the closure runs from `dispose()`
+            // which fires inside the `finally` block, so the field is still
+            // set.
+            (summary) => {
+              this.session?.recordSwarmRun(summary);
+            },
           )
         : null;
       // Pair `swarmMode.enter` and `swarmMode.exit` inside the same try/finally

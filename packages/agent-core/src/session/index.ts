@@ -132,6 +132,23 @@ export interface SessionMeta {
   custom: Record<string, any>;
 }
 
+/**
+ * Per-swarm-run lifecycle summary recorded by `AgentSwarmTool` via the
+ * `SwarmCoordinator.onDispose` callback. The summary lets callers and
+ * downstream tooling inspect recent swarm runs without replaying the full
+ * `orchestrationHooks` event stream.
+ */
+export interface SwarmRunSummary {
+  readonly runId: string;
+  readonly startedAt: number;
+  readonly completedAt: number;
+  readonly memberCount: number;
+  readonly cancelledCount: number;
+  readonly failedCount: number;
+  readonly completedCount: number;
+  readonly errorCount: number;
+}
+
 const BACKGROUND_KEEP_ALIVE_ON_EXIT_ENV = 'KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT';
 const ACTIVE_TURN_CLOSE_TIMEOUT_MS = 8_000;
 
@@ -181,6 +198,7 @@ export class Session {
   private readonly logHandle: SessionLogHandle | undefined;
   readonly hookEngine: HookEngine;
   readonly experimentalFlags: ExperimentalFlagResolver;
+  private readonly swarmRuns = new Map<string, SwarmRunSummary>();
   private toolKaos: Kaos;
   private persistenceKaos: Kaos;
   private agentIdCounter = 0;
@@ -998,6 +1016,29 @@ export class Session {
         snapshot,
       });
     }, 250);
+  }
+
+  // ── Swarm run registry ───────────────────────────────────────────────────
+
+  /**
+   * Record (or overwrite) the lifecycle summary for a swarm run.
+   * `AgentSwarmTool` invokes this from its `SwarmCoordinator.onDispose`
+   * callback so callers can inspect recent swarm runs after the tool call
+   * has settled. Re-recording the same `runId` overwrites the previous
+   * summary — callers that want append-only semantics should pick unique
+   * run ids.
+   */
+  recordSwarmRun(summary: SwarmRunSummary): void {
+    this.swarmRuns.set(summary.runId, summary);
+  }
+
+  /**
+   * Returns recorded swarm-run summaries sorted by `startedAt` descending
+   * (most recent first). The returned array is a fresh copy — callers may
+   * mutate it freely without affecting the underlying registry.
+   */
+  getSwarmRuns(): readonly SwarmRunSummary[] {
+    return Array.from(this.swarmRuns.values()).toSorted((a, b) => b.startedAt - a.startedAt);
   }
 }
 

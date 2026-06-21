@@ -45,7 +45,7 @@ import {
 import { handleGoalCommand } from './goal';
 import { handleLoopCommand } from './loop';
 import { handleProviderCommand } from './provider';
-import { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } from './info';
+import { handleFeedbackCommand, showDiagReport, showMcpServers, showStatusReport, showUsage } from './info';
 import { handlePluginsCommand } from './plugins';
 import { handleReloadCommand, handleReloadTuiCommand } from './reload';
 import { handleSwarmCommand } from './swarm';
@@ -83,6 +83,7 @@ export {
 export { handleSwarmCommand } from './swarm';
 export {
   handleFeedbackCommand,
+  showDiagReport,
   showMcpServers,
   showStatusReport,
   showUsage,
@@ -291,6 +292,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'status':
       void showStatusReport(host);
+      return;
+    case 'diag':
+      void showDiagReport(host);
       return;
     case 'feedback':
       await handleFeedbackCommand(host);

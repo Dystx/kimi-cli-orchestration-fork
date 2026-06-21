@@ -12,12 +12,11 @@
  * returned, otherwise a failing `enter` would leave the tool with a phantom
  * exit call.
  *
- * After Phase 5 Task 5, `runSwarm` switched from a batched
- * `subagentHost.runQueued(...)` call to a sequential `subagentHost.spawn`
- * per task. The mocks below mirror that shape: `spawn` returns a
+ * The mocks below mirror the production contract: `spawn` returns a
  * `SubagentHandle`, the coordinator subscribes to `subagent.completed`
- * through `orchestrationHooks.on`, and the spawn mock fires the matching
- * `subagent.completed` event so `waitFor` resolves on the next poll tick.
+ * through `orchestrationHooks.on` (the real hook contract from Phase 5),
+ * and the spawn mock fires the matching `subagent.completed` event so the
+ * coordinator's `awaitCompletion` promise resolves.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -32,15 +31,17 @@ function makeSession(): {
     emit(event: string, payload: unknown): void;
   };
   log: { warn: ReturnType<typeof vi.fn> };
+  recordSwarmRun: ReturnType<typeof vi.fn>;
 } {
-  // The session mock needs the two surfaces the tool reaches for:
-  // `orchestrationHooks.on` (wrapped by the SwarmCoordinator subscription
-  // shim) and `log.warn` (used by the coordinator on retry errors). The shim
-  // inspects the real `orchestrationHooks` for an `on(event, handler)` method
-  // and forwards subscriptions into it, so the mock must actually retain the
-  // registered handlers — otherwise `spawn`-time `emit` calls would have no
-  // listeners and the coordinator's members would stay in `spawned` state
-  // until the 300s `waitFor` timeout fires.
+  // The session mock provides the surfaces the tool reaches for:
+  // `orchestrationHooks.on` (the real hook contract — the coordinator
+  // subscribes directly via `subscribe()` and registers its handlers in a
+  // Map), `log.warn` (used by the coordinator on retry errors), and
+  // `recordSwarmRun` (invoked from the coordinator's `onDispose` callback
+  // so the session can capture the lifecycle summary). Because handlers are
+  // retained in a Map and dispatched by `emit`, `spawn`-time `emit` calls
+  // reach the coordinator — otherwise its members would stay in `spawned`
+  // state and `awaitCompletion` would never settle.
   const handlers = new Map<string, Array<(e: unknown) => void>>();
   const orchestrationHooks = {
     on(event: string, handler: (e: unknown) => void): () => void {
@@ -56,6 +57,7 @@ function makeSession(): {
   return {
     orchestrationHooks,
     log: { warn: vi.fn() },
+    recordSwarmRun: vi.fn(),
   };
 }
 
@@ -75,11 +77,12 @@ const validArgs = {
 
 describe('AgentSwarmTool + SwarmCoordinator lifecycle', () => {
   it('exits swarm mode even when spawn rejects', async () => {
-    // No need to wire `orchestrationHooks.emit` here — the spawn rejection
-    // bubbles out of `runSwarm` before `registerMember`/`waitFor` ever run,
-    // so the coordinator stays empty. The outer try/catch in `execution`
-    // converts the thrown error into a structured `{ isError: true, output }`
-    // result and the inner finally still fires `swarmMode.exit()`.
+    // No `orchestrationHooks.emit` is needed here — the spawn rejection
+    // bubbles out of `runSwarm` before `registerMember`/`awaitCompletion`
+    // ever run, so the coordinator stays empty. The outer try/catch in
+    // `execution` converts the thrown error into a structured
+    // `{ isError: true, output }` result and the inner finally still fires
+    // `swarmMode.exit()`.
     const spawn = vi.fn().mockRejectedValue(new Error('host down'));
     const swarmMode = { enter: vi.fn(), exit: vi.fn() };
     const subagentHost = { spawn };
@@ -105,10 +108,9 @@ describe('AgentSwarmTool + SwarmCoordinator lifecycle', () => {
     // `registerMember` has had a chance to run. The cleanest way to order
     // "registerMember before emit" is to defer the emit one macrotask via
     // `setTimeout(..., 0)`: the spawn promise resolves first (so the
-    // continuation runs registerMember + starts `waitFor`), and only then
-    // does the queued emit fire and flip the member to `completed`. The
-    // following `waitFor` poll tick (100ms later) then resolves the promise
-    // and the loop proceeds to the next item.
+    // continuation runs registerMember + arms `awaitCompletion`), and only
+    // then does the queued emit fire and flip the member to `completed`,
+    // resolving the per-member promise so the loop proceeds to the next item.
     const session = makeSession();
     let counter = 0;
     const spawn = vi.fn().mockImplementation(() => {

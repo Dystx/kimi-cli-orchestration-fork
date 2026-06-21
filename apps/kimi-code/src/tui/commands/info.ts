@@ -4,6 +4,7 @@ import type { McpServerInfo, SessionStatus, SessionUsage } from '@moonshot-ai/ki
 
 import { buildMcpStatusReportLines } from '../components/messages/mcp-status-panel';
 import { buildStatusReportLines } from '../components/messages/status-panel';
+import { buildDiagReportLines } from '../components/messages/diag-panel';
 import { buildUsageReportLines, UsagePanelComponent, type ManagedUsageReport } from '../components/messages/usage-panel';
 import {
   FEEDBACK_ISSUE_URL,
@@ -181,4 +182,25 @@ async function loadManagedUsageReport(host: SlashCommandHost): Promise<ManagedUs
     return { error: res.message };
   }
   return { usage: { summary: res.summary, limits: res.limits } };
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics (`/diag`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Render the orchestrator-diagnostics + swarm-runs panel.
+ *
+ * The orchestrator snapshot is read from `appState.statusSnapshot` (mirroring
+ * how `/status` consumes the same field). Swarm-run summaries are not yet
+ * exposed through the SDK Session, so this currently renders an empty list;
+ * once the SDK surfaces `getSwarmRuns`, populate the second argument here.
+ */
+export async function showDiagReport(host: SlashCommandHost): Promise<void> {
+  const orchestrator = host.state.appState.statusSnapshot?.orchestrator;
+  const swarmRuns: readonly never[] = [];
+  const lines = buildDiagReportLines({ orchestrator, swarmRuns });
+  const panel = new UsagePanelComponent(() => lines, 'primary', ' Diagnostics ');
+  host.state.transcriptContainer.addChild(panel);
+  host.state.ui.requestRender();
 }
