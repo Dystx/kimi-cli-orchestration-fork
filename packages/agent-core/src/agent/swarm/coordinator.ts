@@ -1,3 +1,9 @@
+import type {
+  SwarmMemberSnapshot,
+  SwarmMemberStatus as ProtocolMemberStatus,
+  SwarmRunSnapshot,
+} from '@moonshot-ai/protocol';
+
 import type { OrchestrationEvent } from '../../session/orchestration/types';
 import type { SwarmRunSummary } from '../../session';
 import type { SubagentResult } from '../../session/subagent-batch';
@@ -41,6 +47,36 @@ function getSubagentId(e: unknown): string | undefined {
   return undefined;
 }
 
+// Map the coordinator's internal lifecycle status onto the protocol's
+// user-facing `SwarmMemberStatus`. The protocol omits the coordinator's
+// non-terminal `spawned` and `suspended` variants — `spawned` is exposed
+// as `queued` so a freshly registered subagent reads as "waiting to
+// start", and `suspended` (paused mid-flight, awaiting resume) reads as
+// `running` so consumers see it as still in progress rather than done.
+function toProtocolStatus(status: SwarmMemberStatus): ProtocolMemberStatus {
+  switch (status) {
+    case 'spawned':
+      return 'queued';
+    case 'started':
+    case 'suspended':
+      return 'running';
+    case 'completed':
+      return 'completed';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'cancelled';
+  }
+}
+
+function extractErrorMessage(m: SwarmMember): string | undefined {
+  const result = m.result as { error?: unknown } | undefined;
+  const err = result?.error;
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  return undefined;
+}
+
 export class SwarmCoordinator {
   readonly runId: string;
   private readonly members = new Map<string, SwarmMember>();
@@ -56,6 +92,9 @@ export class SwarmCoordinator {
   private readonly diagnosticState = new Map<string, { lastError?: unknown }>();
   private disposed = false;
   private readonly startedAt: number;
+  private readonly session?: {
+    emitSwarmSnapshot(snapshot: SwarmRunSnapshot): void;
+  };
   private readonly onDispose?: (summary: SwarmRunSummary) => void;
 
   constructor(
@@ -68,6 +107,7 @@ export class SwarmCoordinator {
         subagentHost: {
           spawn(options: unknown): Promise<{ subagentId: string }>;
         };
+        emitSwarmSnapshot(snapshot: SwarmRunSnapshot): void;
       };
       log: { warn(msg: string, meta?: unknown): void };
     },
@@ -77,6 +117,7 @@ export class SwarmCoordinator {
     this.runId = runId;
     this.startedAt = Date.now();
     this.onDispose = onDispose;
+    this.session = agent.session;
     this.subscribe();
   }
 
@@ -119,6 +160,7 @@ export class SwarmCoordinator {
       m.status = 'started';
       m.startedAt = Date.now();
       this.resolvePendingCompletions(id);
+      this.emitSnapshot();
     });
 
     off('subagent.suspended', (e) => {
@@ -128,6 +170,7 @@ export class SwarmCoordinator {
       if (m === undefined) return;
       m.status = 'suspended';
       this.resolvePendingCompletions(id);
+      this.emitSnapshot();
     });
 
     off('subagent.completed', (e) => {
@@ -149,6 +192,7 @@ export class SwarmCoordinator {
         m.result = { result: payload.resultSummary } as unknown as SubagentResult;
       }
       this.resolvePendingCompletions(id);
+      this.emitSnapshot();
     });
 
     off('subagent.failed', (e) => {
@@ -182,6 +226,7 @@ export class SwarmCoordinator {
       diag.lastError = errorInstance;
       this.diagnosticState.set(id, diag);
       this.resolvePendingCompletions(id);
+      this.emitSnapshot();
     });
   }
 
@@ -198,6 +243,7 @@ export class SwarmCoordinator {
       }
       this.resolvePendingCompletions(m.subagentId);
     }
+    this.emitSnapshot();
   }
 
   async retryFailed(): Promise<readonly SubagentResult[]> {
@@ -311,6 +357,15 @@ export class SwarmCoordinator {
       if (diag.lastError !== undefined) errorCount += 1;
     }
 
+    // Emit the final snapshot before clearing `members` so subscribers see
+    // the full per-member state at settle time. `this.disposed` is already
+    // true at this point, so `buildSnapshot` will stamp `completedAt` and
+    // route the snapshot through `Session.recordSwarmRun` via
+    // `emitSwarmSnapshot`. We deliberately keep the legacy `onDispose`
+    // callback path for callers that wired it directly (e.g. test fixtures);
+    // production callers should rely on `session.emitSwarmSnapshot` instead.
+    this.emitSnapshot();
+
     for (const [, pending] of this.pendingCompletions) {
       pending.reject(new Error('SwarmCoordinator disposed'));
     }
@@ -330,5 +385,43 @@ export class SwarmCoordinator {
       completedCount,
       errorCount,
     });
+  }
+
+  // Build a protocol-shaped snapshot from the coordinator's current
+  // member state. `completedAt` is set iff the coordinator has been
+  // disposed so `Session.emitSwarmSnapshot` can route it through
+  // `recordSwarmRun` for the history registry.
+  private buildSnapshot(): SwarmRunSnapshot {
+    const members: SwarmMemberSnapshot[] = Array.from(this.members.values()).map((m) => ({
+      memberId: m.subagentId,
+      status: toProtocolStatus(m.status),
+      startedAt: m.startedAt,
+      completedAt: m.completedAt,
+      errorMessage: extractErrorMessage(m),
+    }));
+    const totals = { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0 };
+    for (const m of members) {
+      if (m.status === 'queued') totals.queued += 1;
+      else if (m.status === 'running') totals.running += 1;
+      else if (m.status === 'completed') totals.completed += 1;
+      else if (m.status === 'failed') totals.failed += 1;
+      else if (m.status === 'cancelled') totals.cancelled += 1;
+    }
+    return {
+      runId: this.runId,
+      startedAt: this.startedAt,
+      completedAt: this.disposed ? Date.now() : undefined,
+      memberCount: this.members.size,
+      members,
+      totals,
+    };
+  }
+
+  // Hand the current snapshot to the session so live subscribers (TUI
+  // progress panel) and the active/history registries stay in sync with
+  // every member transition. No-op when no session is wired (test
+  // harnesses that build an Agent without a Session).
+  private emitSnapshot(): void {
+    this.session?.emitSwarmSnapshot(this.buildSnapshot());
   }
 }

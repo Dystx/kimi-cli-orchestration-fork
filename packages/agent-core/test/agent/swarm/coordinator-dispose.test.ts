@@ -12,6 +12,7 @@ function makeAgent(): {
   session: {
     orchestrationHooks: { on(event: string, handler: (e: unknown) => void): () => void };
     subagentHost: { spawn: ReturnType<typeof vi.fn> };
+    emitSwarmSnapshot: ReturnType<typeof vi.fn>;
   };
   log: { warn: ReturnType<typeof vi.fn> };
 } {
@@ -31,6 +32,11 @@ function makeAgent(): {
         },
       },
       subagentHost: { spawn: vi.fn() },
+      // Phase 10: SwarmCoordinator.dispose() emits a final snapshot via
+      // `session.emitSwarmSnapshot`. Mock the entry point so the dispose
+      // path can run without throwing — the assertions in this file still
+      // cover the legacy `onDispose` callback surface.
+      emitSwarmSnapshot: vi.fn(),
     },
     log: { warn: vi.fn() },
   };
