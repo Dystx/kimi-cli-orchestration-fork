@@ -12,5 +12,10 @@ coverage/
 .kimi-stash-dir
 plugins/cdn/
 .kimi-code/
+
+# Runtime artifacts created by agent-core during dev / test runs.
+packages/agent-core/memory/
+packages/agent-core/state/
+
 superpowers
 .worktrees/

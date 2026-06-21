@@ -1,182 +1,88 @@
-# Kimi CLI Orchestration Fork
+# Kimi CLI — Orchestration Fork
 
-> **An event-driven orchestration layer for Kimi Code CLI.** This fork adds automatic skill injection, adaptive prompts, and configurable event-to-skill mappings — so your agent adapts its behavior based on what happens in the session.
+> **Event-driven orchestration + live swarm visibility for [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code).** This fork adds an adaptive policy layer, a real-time swarm progress panel, a `/diag` diagnostics view, and minimax-backed web/image search — all layered on top of the upstream CLI without breaking its surface.
 
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Tests](https://img.shields.io/badge/tests-2617%20passed-brightgreen)]() [![Upstream](https://img.shields.io/badge/upstream-MoonshotAI%2Fkimi--code-blue)](https://github.com/MoonshotAI/kimi-code)
-
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Upstream](https://img.shields.io/badge/upstream-MoonshotAI%2Fkimi--code-blue)](https://github.com/MoonshotAI/kimi-code) [![Tests](https://img.shields.io/badge/tests-3,200%2B%20passed-brightgreen)]()
 [Documentation](https://moonshotai.github.io/kimi-code/en/) · [Issues](https://github.com/MoonshotAI/kimi-code/issues) · [中文](README.zh-CN.md)
 
 ---
 
-## What this fork adds
+## What's in this fork
 
-The upstream [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) is an AI coding agent that runs in your terminal. **This fork adds an orchestration system** that watches session events and automatically injects relevant skills into the conversation — no manual prompting required.
+Twelve landed phases plus a search-provider stack, all on top of upstream Kimi Code CLI:
 
-### How it works
+| Area | What you get |
+|------|--------------|
+| **Orchestration policies** | `Orchestrator` runs pluggable `OrchestrationPolicy` instances before each step. Built-ins include skill routing (auto-inject relevant skills), memory injection (surface prior notes), and plan tracking. Every policy exposes `recordError(name, error)` so its own failures stay observable. |
+| **Live swarm panel** | When `AgentSwarmTool` runs, a `SwarmProgressController` mounts a panel that updates on every per-member state change + dispose. Each member shows its current tool call (e.g. `[read_file kimi-code/README.md]`) alongside its status icon. Auto-shows when a swarm starts, auto-hides when it ends. |
+| **`/diag` diagnostics** | Slash command renders orchestrator-policy fire counts + last errors plus a recent-swarm-runs list. Reads `Session.getSwarmRunHistory()` and `Orchestrator.getDiagnostics()`. |
+| **Memory MCP server** | Bundled MCP server ships four tools (`memory_read/write/search/delete`) plus a `MemoryPolicy` that auto-surfaces relevant notes into the conversation. Opt-in via `SessionOptions.enableMemoryMcpServer`. |
+| **Skill routing** | `SkillRouter` scores the active skills against the user's prompt and pre-injects the best matches. Gated behind the `skill_routing` experimental flag. |
+| **Search providers** | `minimax-web-search`, `minimax-image-search`, and a `chained-web-search` fallback composer. `web_search` builtin routes through the chain. Selected via config; falls back gracefully. |
+| **Cross-cutting** | `Session.emitSwarmSnapshot` fires on every member transition, fans out as a typed `swarm.run.snapshot` event over the SDK RPC pipe, and is mirrored in the SDK's session-local cache so SDK consumers don't need a separate subscription. |
 
-When a subagent finishes with a diff → inject `code-review`.  
-When a task completes → inject `quality-gate`.  
-When health degrades → inject `troubleshooting`.  
-When a cron job fires → inject `plan-first`.
-
-All configurable via `config.toml`.
-
-```toml
-[orchestration]
-enabled = true
-max_queue_size = 50
-max_injection_size = 4000
-cooldown_ms = 300000
-max_skill_repetition = 3
-
-[[orchestration.mappings]]
-event = "subagent.completed"
-skill = "code-review"
-condition = "hasDiff"
-priority = 3
-
-[[orchestration.mappings]]
-event = "task.completed"
-skill = "quality-gate"
-condition = "isCodeTask"
-priority = 2
-
-[[orchestration.mappings]]
-event = "health.degraded"
-skill = "troubleshooting"
-priority = 0
-```
-
-### Features
-
-- **15 event types** — `task.*`, `subagent.*`, `goal.*`, `health.degraded`, `cron.fired`, `hook.fired`, `mcp.failed`
-- **6 built-in conditions** — `hasDiff`, `isCodeTask`, `testFailure`, `runtimeError`, `goalActive`, `taskCountGt2`
-- **Priority queue** — lower number = higher priority, FIFO within same priority
-- **Rate limiting** — cooldown per event type prevents spam
-- **Deduplication** — identical events are suppressed within a rolling window
-- **Repetition suppression** — skills stop injecting after `max_skill_repetition` consecutive triggers
-- **Effectiveness tracking** — records turn outcomes per skill to learn which mappings work
-- **Adaptive goal continuation** — recent events are summarized and appended to goal continuation prompts
-- **Persistence** — queue and history survive session restarts via `orchestration.json`
-- **Memory integration** — effectiveness insights are persisted to the memory store for cross-session recall
+Everything upstream still works: single-binary distribution, MCP, plugins, subagents, hooks, ACP. None of this fork's APIs are invasive — `/diag` is opt-in, swarm panel is auto-managed, search providers fall back to upstream defaults if config is missing.
 
 ---
 
 ## Install
 
-Same as upstream. No Node.js required.
+Same as upstream.
 
-- **macOS or Linux**:
+- **macOS / Linux**: `curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash`
+- **Homebrew**: `brew install kimi-code`
+- **Windows (PowerShell)**: `irm https://code.kimi.com/kimi-code/install.ps1 | iex`
 
-```sh
-curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
-```
+Verify: `kimi --version`.
 
-- **Homebrew (macOS/Linux)**:
-
-```sh
-brew install kimi-code
-```
-
-- **Windows (PowerShell)**:
-
-```powershell
-irm https://code.kimi.com/kimi-code/install.ps1 | iex
-```
-
-Then run:
-
-```sh
-kimi --version
-```
-
-## Quick Start
+## Quick start
 
 ```sh
 cd your-project
 kimi
 ```
 
-On first launch, run `/login` inside Kimi Code CLI and choose either Kimi Code OAuth or a Moonshot AI Open Platform API key.
+On first launch, run `/login` inside the TUI and choose Kimi Code OAuth or a Moonshot AI Open Platform API key.
 
-## Configure orchestration
+Then try:
 
-Add to `~/.kimi-code/config.toml` (global) or `.kimi-code/config.toml` (project-level):
+- `/status` — overall session status + orchestrator section.
+- `/diag` — orchestrator policy diagnostics + recent swarm runs.
+- Run a swarm (via the `agent_swarm` tool / `subagent` skill) and watch the live panel update.
+
+## Configure
+
+`~/.kimi-code/config.toml` (global) or `.kimi-code/config.toml` (project-level).
+
+### Orchestration (opt-in)
 
 ```toml
 [orchestration]
 enabled = true
-max_queue_size = 50
-max_injection_size = 4000
-cooldown_ms = 300000
-max_skill_repetition = 3
 
 [[orchestration.mappings]]
 event = "subagent.completed"
 skill = "code-review"
 condition = "hasDiff"
 priority = 3
-
-[[orchestration.mappings]]
-event = "task.completed"
-skill = "quality-gate"
-condition = "isCodeTask"
-priority = 2
-
-[[orchestration.mappings]]
-event = "goal.started"
-skill = "plan-first"
-condition = "taskCountGt2"
-priority = 1
-
-[[orchestration.mappings]]
-event = "health.degraded"
-skill = "troubleshooting"
-priority = 0
-
-[[orchestration.mappings]]
-event = "subagent.completed"
-skill = "evidence-contract"
-condition = "hasDiff"
-priority = 3
-
-[[orchestration.mappings]]
-event = "goal.blocked"
-skill = "test-debug-loop"
-condition = "testFailure"
-priority = 0
-
-[[orchestration.mappings]]
-event = "goal.paused"
-skill = "troubleshooting"
-condition = "runtimeError"
-priority = 0
-
-[[orchestration.mappings]]
-event = "task.created"
-skill = "plan-first"
-condition = "taskCountGt2"
-priority = 1
 ```
 
-**Events:** `task.completed`, `task.failed`, `task.created`, `task.unblocked`, `subagent.completed`, `subagent.failed`, `subagent.started`, `goal.started`, `goal.completed`, `goal.blocked`, `goal.paused`, `health.degraded`, `cron.fired`, `hook.fired`, `mcp.failed`.
+Mappings are stored as config; the `Orchestrator` reads them at session start. `event` is one of the lifecycle event types emitted by the agent core; `skill` names a skill under `~/.kimi/skills/`. Conditions are evaluated against the event payload.
 
-**Conditions:** `hasDiff`, `isCodeTask`, `testFailure`, `runtimeError`, `goalActive`, `taskCountGt2`.
+### Memory MCP
 
-## Upstream features
+`SessionOptions.enableMemoryMcpServer = true` opens the bundled memory server with `memory_read/write/search/delete`. The `MemoryPolicy` can also auto-inject relevant notes into prompts.
 
-This fork includes all upstream Kimi Code CLI features:
+### Search providers
 
-- Single-binary distribution
-- Blazing-fast TUI startup
-- Video input
-- AI-native MCP configuration
-- Rich plugin ecosystem
-- Subagents for focused, parallel work
-- Lifecycle hooks
-- Editor & IDE integration (ACP)
+```toml
+[search.web]
+provider = "chained"   # primary → fallback on empty / error
+primary  = "minimax"
+fallback = "upstream"
+```
 
-See [upstream documentation](https://moonshotai.github.io/kimi-code/en/) for details.
+The chain tries the primary first and only consumes the fallback when the primary returns no results or errors.
 
 ## Develop
 
@@ -189,29 +95,37 @@ pnpm install
 ```
 
 ```sh
-pnpm dev:cli    # run the CLI in dev mode
-pnpm test       # run tests
-pnpm typecheck  # TypeScript check
-pnpm lint       # oxlint
-pnpm build      # build all packages
+pnpm dev:cli        # run the CLI in dev mode
+pnpm test           # vitest
+pnpm typecheck      # tsc --noEmit across all packages
+pnpm lint           # oxlint
+pnpm build          # build every package
 ```
 
-### Test coverage
+### Project layout
 
-- **2,617 tests passing** across 181 test files
-- **20 orchestration-specific integration tests** covering all event types, persistence, rate-limiting, dedup, skill injection, and memory integration
+```
+apps/kimi-code/               # the CLI binary
+packages/agent-core/          # Orchestrator, SwarmCoordinator, Session, MCP
+packages/protocol/            # shared wire types (SwarmRunSnapshot, AgentEvent, etc.)
+packages/node-sdk/            # the kimi-code-sdk SDK (consumed by kimi-code)
+docs/superpowers/specs/       # design specs (one per phase)
+docs/superpowers/plans/       # implementation plans
+```
 
-## Docs
+Phases 1–12 are documented individually under `docs/superpowers/specs/`; the architecture overview lives at `docs/superpowers/specs/2026-06-19-phase-9-architecture-design.md`.
 
-- [Getting Started](https://moonshotai.github.io/kimi-code/en/guides/getting-started)
-- [Configuration](https://moonshotai.github.io/kimi-code/en/configuration/config-files)
-- [Command reference](https://moonshotai.github.io/kimi-code/en/reference/kimi-command)
+## Test coverage
+
+- 3,200+ tests across agent-core, node-sdk, and kimi-code.
+- Integration tests cover orchestration policies (skill routing, memory injection, plan tracking), swarm coordinator (member lifecycle, snapshot emission, activity tracking), SDK plumbing (subscribe/active/history caches), and the search provider chain.
 
 ## Community
 
-- [Upstream issues](https://github.com/MoonshotAI/kimi-code/issues)
-- For security vulnerabilities, see [SECURITY.md](SECURITY.md).
+- [Upstream issues](https://github.com/MoonshotAI/kimi-code/issues) — report bugs against upstream first; this fork inherits its behavior except for the additions above.
+- See [SECURITY.md](SECURITY.md) for vulnerability reporting.
+- See [FORK_CHANGES.md](FORK_CHANGES.md) for the full diff summary vs upstream.
 
 ## License
 
-Released under the [MIT License](LICENSE).
+MIT. See [LICENSE](LICENSE).

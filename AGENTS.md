@@ -72,3 +72,18 @@ This is a TypeScript monorepo built for agent-assisted development. Keep the roo
 - After finishing a task and before submitting a PR, you must run the `gen-changesets` skill (see `.agents/skills/gen-changesets/SKILL.md`) and generate a changeset under `.changeset/` according to its rules.
 - When generating a changeset, **never** decide on a `major` bump on your own. When you judge a change to meet the major criteria (breaking changes, incompatible user configuration, renamed or removed commands/arguments, changed behavior semantics, etc.), you must stop and explain it to the user and ask for confirmation. **Only write `major` after the user has explicitly agreed.** Otherwise default to `minor` (and fall back to `patch` if `minor` is unclear). See the "Hard rule: confirm with the user before writing `major`" section in `.agents/skills/gen-changesets/SKILL.md` for details.
 - Prefer importing via `import ... from '#/...'`, which serves the same purpose as `import ... from '@/...'`.
+
+## Fork-specific notes
+
+This branch adds an `Orchestrator` runtime + swarm visibility on top of upstream. See:
+
+- `docs/superpowers/specs/2026-06-19-phase-9-architecture-design.md` — single canonical architecture overview.
+- `FORK_CHANGES.md` — user-facing changes vs upstream.
+- `ROADMAP.md` — implementation status + open items.
+
+Key invariants worth knowing when touching this code:
+
+- `Orchestrator.getDiagnostics()` is the canonical surface for orchestrator state; `/status` and `/diag` both read from it.
+- `Session.emitSwarmSnapshot(snapshot)` is the only correct way to fan a swarm event out to SDK consumers; do not call `session.orchestrationHooks.emit({ type: 'swarm.run.snapshot', ... })` directly from coordinators.
+- `SwarmCoordinator` lifecycle: `buildSnapshot()` + `emitSnapshot()` are private; do not emit snapshots from outside the coordinator.
+- The TUI uses `@earendil-works/pi-tui` (pi-tui), not Ink. Components return `string[]` matching the `Component.render(width)` contract.
