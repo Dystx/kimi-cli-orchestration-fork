@@ -139,7 +139,7 @@ export type TranscriptEntryKind =
   | 'cron'
   | 'goal';
 
-export type SkillActivationTrigger = 'user-slash' | 'model-tool' | 'nested-skill';
+export type SkillActivationTrigger = 'user-slash' | 'model-tool' | 'nested-skill' | 'auto-routed';
 
 export interface TranscriptEntry {
   id: string;
