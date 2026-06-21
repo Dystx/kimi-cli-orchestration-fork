@@ -156,6 +156,15 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
               log: this.session.log,
             },
             abortController,
+            // Hand the lifecycle summary back to the session so callers
+            // and downstream tooling can inspect recent swarm runs without
+            // replaying the orchestration event stream. Capture
+            // `this.session` in a local — the closure runs from `dispose()`
+            // which fires inside the `finally` block, so the field is still
+            // set.
+            (summary) => {
+              this.session?.recordSwarmRun(summary);
+            },
           )
         : null;
       // Pair `swarmMode.enter` and `swarmMode.exit` inside the same try/finally

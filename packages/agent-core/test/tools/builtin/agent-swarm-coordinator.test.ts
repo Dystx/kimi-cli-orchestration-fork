@@ -32,15 +32,18 @@ function makeSession(): {
     emit(event: string, payload: unknown): void;
   };
   log: { warn: ReturnType<typeof vi.fn> };
+  recordSwarmRun: ReturnType<typeof vi.fn>;
 } {
-  // The session mock needs the two surfaces the tool reaches for:
+  // The session mock needs the surfaces the tool reaches for:
   // `orchestrationHooks.on` (wrapped by the SwarmCoordinator subscription
-  // shim) and `log.warn` (used by the coordinator on retry errors). The shim
-  // inspects the real `orchestrationHooks` for an `on(event, handler)` method
-  // and forwards subscriptions into it, so the mock must actually retain the
-  // registered handlers — otherwise `spawn`-time `emit` calls would have no
-  // listeners and the coordinator's members would stay in `spawned` state
-  // until the 300s `waitFor` timeout fires.
+  // shim), `log.warn` (used by the coordinator on retry errors), and
+  // `recordSwarmRun` (invoked from the coordinator's `onDispose` callback
+  // so the session can capture the lifecycle summary). The shim inspects
+  // the real `orchestrationHooks` for an `on(event, handler)` method and
+  // forwards subscriptions into it, so the mock must actually retain the
+  // registered handlers — otherwise `spawn`-time `emit` calls would have
+  // no listeners and the coordinator's members would stay in `spawned`
+  // state until the 300s `waitFor` timeout fires.
   const handlers = new Map<string, Array<(e: unknown) => void>>();
   const orchestrationHooks = {
     on(event: string, handler: (e: unknown) => void): () => void {
@@ -56,6 +59,7 @@ function makeSession(): {
   return {
     orchestrationHooks,
     log: { warn: vi.fn() },
+    recordSwarmRun: vi.fn(),
   };
 }
 
