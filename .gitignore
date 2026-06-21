@@ -16,6 +16,9 @@ plugins/cdn/
 # Runtime artifacts created by agent-core during dev / test runs.
 packages/agent-core/memory/
 packages/agent-core/state/
+# Same artifacts at the repo root, created by `kimi` runs.
+memory/
+state/
 
 superpowers
 .worktrees/
