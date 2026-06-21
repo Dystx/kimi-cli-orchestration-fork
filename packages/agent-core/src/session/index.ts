@@ -1110,10 +1110,10 @@ export class Session {
     for (const cb of this.swarmSubscribers) {
       try {
         cb(snapshot);
-      } catch (err) {
+      } catch (error) {
         // Subscriber failures must not poison the coordinator loop or block
         // other subscribers from observing the snapshot. Log and continue.
-        this.log.warn('swarm subscriber threw', err);
+        this.log.warn('swarm subscriber threw', error);
       }
     }
   }
