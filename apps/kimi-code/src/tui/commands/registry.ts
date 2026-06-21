@@ -233,6 +233,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'diag',
+    aliases: ['diagnostics'],
+    description: 'Show orchestrator policy diagnostics and recent swarm runs.',
+    priority: 60,
+    availability: 'always',
+  },
+  {
     name: 'feedback',
     aliases: [],
     description: 'Send feedback to make Kimi Code better',
