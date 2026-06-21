@@ -972,6 +972,7 @@ export class Session {
       contextTokens,
       maxContextTokens,
       orchestration: this.orchestrationHooks.metrics(),
+      orchestrator: mainAgent?.orchestrator?.getDiagnostics(),
     };
   }
 
