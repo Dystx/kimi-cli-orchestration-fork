@@ -168,23 +168,35 @@ describe('Local logging — harness integration', () => {
   });
 
   it('default export works when no session log file exists', async () => {
-    const homeDir = await makeTempDir('kimi-log-home-');
-    const workDir = await makeTempDir('kimi-log-work-');
-    const harness = createKimiHarness({ identity: TEST_IDENTITY, homeDir });
-    const session = await harness.createSession({ id: 'ses_no_session_log', workDir });
+    // Suppress log writes during this test so no session log file is created.
+    // Without this, the harness's root logger (configured at info level by
+    // beforeEach) creates a session log file as soon as the session is opened,
+    // which would defeat the purpose of this test (asserting the "no log"
+    // path).
+    process.env['KIMI_LOG_LEVEL'] = 'off';
+    await __resetRootLoggerForTest();
+    try {
+      const homeDir = await makeTempDir('kimi-log-home-');
+      const workDir = await makeTempDir('kimi-log-work-');
+      const harness = createKimiHarness({ identity: TEST_IDENTITY, homeDir });
+      const session = await harness.createSession({ id: 'ses_no_session_log', workDir });
 
-    const outputPath = join(workDir, 'no-log.zip');
-    const result = await harness.exportSession({ id: session.id, outputPath, version: '1.0.0-test' });
+      const outputPath = join(workDir, 'no-log.zip');
+      const result = await harness.exportSession({ id: session.id, outputPath, version: '1.0.0-test' });
 
-    const entries = readZipEntries(await readFile(result.zipPath));
-    expect(entries.has('agents/main/wire.jsonl')).toBe(true);
-    expect(entries.has('logs/kimi-code.log')).toBe(false);
-    expect(result.manifest.sessionLogPath).toBeUndefined();
-    const manifest = JSON.parse(entries.get('manifest.json')!.toString('utf-8')) as Record<
-      string,
-      unknown
-    >;
-    expect(manifest['sessionLogPath']).toBeUndefined();
+      const entries = readZipEntries(await readFile(result.zipPath));
+      expect(entries.has('agents/main/wire.jsonl')).toBe(true);
+      expect(entries.has('logs/kimi-code.log')).toBe(false);
+      expect(result.manifest.sessionLogPath).toBeUndefined();
+      const manifest = JSON.parse(entries.get('manifest.json')!.toString('utf-8')) as Record<
+        string,
+        unknown
+      >;
+      expect(manifest['sessionLogPath']).toBeUndefined();
+    } finally {
+      process.env['KIMI_LOG_LEVEL'] = 'info';
+      await __resetRootLoggerForTest();
+    }
   });
 
   it('default export includes rotated session log files without requiring active kimi-code.log', async () => {

@@ -321,6 +321,7 @@ describe('KimiHarness config API', () => {
   it('returns experimental feature metadata through the harness', async () => {
     vi.stubEnv('KIMI_CODE_EXPERIMENTAL_FLAG', '0');
     vi.stubEnv('KIMI_CODE_EXPERIMENTAL_MICRO_COMPACTION', '');
+    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_SKILL_ROUTING', '');
     const homeDir = await makeTempDir();
     await writeFile(
       join(homeDir, 'config.toml'),
@@ -345,6 +346,7 @@ micro_compaction = false
     });
     expect(features).toEqual([
       expect.objectContaining({ id: 'micro_compaction', enabled: false }),
+      expect.objectContaining({ id: 'skill_routing', enabled: false }),
     ]);
   });
 
