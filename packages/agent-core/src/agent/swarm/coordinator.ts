@@ -291,10 +291,7 @@ export class SwarmCoordinator {
     off('tool.call.started', (e) => {
       const payload = (e as { payload?: { subagentId?: unknown; toolName?: unknown; args?: unknown } }).payload;
       const subagentId = payload?.subagentId;
-      // TODO(phase-12): turn/index.ts emits `tool.call.started` without
-      // `subagentId`; subagent-host should re-emit these events through
-      // `orchestrationHooks` stamped with the child id. Until that lands,
-      // production child-agent tool calls will silently fall through here.
+      // subagent-host (Phase 12) re-emits these events with `subagentId` set.
       if (typeof subagentId !== 'string') return;
       const memberId = this.memberBySubagentId.get(subagentId);
       if (memberId === undefined) return;

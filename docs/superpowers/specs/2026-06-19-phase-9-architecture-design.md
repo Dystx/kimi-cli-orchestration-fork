@@ -103,7 +103,14 @@ Each phase has its own spec + plan in this directory; this document is the entry
 - **Files:** `packages/protocol/src/swarm.ts`, `packages/agent-core/src/agent/swarm/args-summary.ts`, `packages/agent-core/src/agent/swarm/coordinator.ts`, `apps/kimi-code/src/tui/components/messages/swarm-progress.tsx`.
 - **Public APIs:** `SwarmMemberToolCall`, `SwarmMemberSnapshot.currentToolCall`, `summarizeArgs(toolName, args)`.
 - **Key invariants:** Coordinator tracks `memberBySubagentId` on `subagent.spawned`; updates `currentToolCall` on `tool.call.started`; clears on `tool.result`. `summarizeArgs` shortens paths to last two segments, truncates long commands to 48 chars.
-- **Known gap (Phase 12):** `turn/index.ts` emits `tool.call.started` / `tool.result` events without `subagentId`. `subagent-host.ts` must re-emit these through `orchestrationHooks` stamped with the child's id for production activity tracking to activate. Test harness fires events directly with `subagentId`, so tests pass; production will show "no activity" until Phase 12.
+- **Phase 12 follow-up:** `subagent-host` now subscribes to each child's RPC event stream and re-emits `tool.call.started` / `tool.result` events through `session.orchestrationHooks` stamped with `subagentId`. Production activity tracking is live.
+
+## Phase 12 — subagentId plumbing for tool events
+
+- **Goal:** Close the Phase 11 production gap: child-agent `tool.call.started` / `tool.result` events now carry `subagentId` so `SwarmCoordinator`'s activity tracking activates in production.
+- **Files:** `packages/agent-core/src/session/subagent-host.ts`, `packages/agent-core/src/rpc/sdk-api.ts`, `packages/agent-core/src/rpc/client.ts`, `packages/agent-core/src/rpc/types.ts`, `packages/node-sdk/src/rpc.ts`.
+- **Public APIs:** `SDKAgentAPI.onEvent: (listener) => () => void` (new subscription surface); `SubagentHost.attachChildToolEventBridge(subagentId, childRpc, hooks): () => void`.
+- **Key invariants:** `RPCMethods<T>` and `proxyWithExtraPayload` preserve function-returning methods (subscriptions) without forcing `Promise<...>` wrapping; `WithExtraPayload` skips `onEvent` so listener payloads aren't polluted with agent/session id intersections.
 
 ## How to extend the system
 
