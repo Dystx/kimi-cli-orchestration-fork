@@ -58,6 +58,8 @@ export type {
   ResumedAgentState,
   ServicesConfig,
   SessionStatusSnapshot,
+  SwarmMemberSnapshot,
+  SwarmMemberToolCall,
   SwarmRunSnapshot,
   SwarmRunSummary,
   ShellEnvironment,

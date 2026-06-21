@@ -12,6 +12,7 @@
 import type {
   SwarmMemberSnapshot,
   SwarmMemberStatus,
+  SwarmMemberToolCall,
   SwarmRunSnapshot,
 } from '@moonshot-ai/kimi-code-sdk';
 import chalk from 'chalk';
@@ -19,7 +20,12 @@ import chalk from 'chalk';
 // Re-export the SDK types so consumers (`SwarmProgressController`,
 // `useSwarmProgress` callers) can keep their existing import sites
 // pointing at this module if they prefer.
-export type { SwarmMemberSnapshot, SwarmMemberStatus, SwarmRunSnapshot };
+export type {
+  SwarmMemberSnapshot,
+  SwarmMemberStatus,
+  SwarmMemberToolCall,
+  SwarmRunSnapshot,
+};
 
 const STATUS_ICON: Record<SwarmMemberStatus, string> = {
   queued: '·',
@@ -44,6 +50,12 @@ function colorizeForStatus(status: SwarmMemberStatus, text: string): string {
   }
 }
 
+function formatActivity(call: SwarmMemberToolCall): string {
+  return call.argsSummary !== undefined
+    ? `[${call.toolName} ${call.argsSummary}]`
+    : `[${call.toolName}]`;
+}
+
 export function SwarmProgressMessage({ snapshot }: { snapshot: SwarmRunSnapshot }): string[] {
   const { totals, memberCount, runId, members } = snapshot;
   const lines: string[] = [
@@ -52,7 +64,12 @@ export function SwarmProgressMessage({ snapshot }: { snapshot: SwarmRunSnapshot 
   ];
   for (const m of members) {
     const detail = m.errorMessage !== undefined ? ` — ${m.errorMessage}` : '';
-    lines.push(colorizeForStatus(m.status, `  ${STATUS_ICON[m.status]} ${m.memberId}${detail}`));
+    const activity = m.currentToolCall !== undefined
+      ? ' ' + chalk.dim(formatActivity(m.currentToolCall))
+      : '';
+    lines.push(
+      colorizeForStatus(m.status, `  ${STATUS_ICON[m.status]} ${m.memberId}${detail}`) + activity,
+    );
   }
   return lines;
 }

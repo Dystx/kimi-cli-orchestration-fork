@@ -44,6 +44,7 @@ export type {
 export type {
   SwarmMemberSnapshot,
   SwarmMemberStatus,
+  SwarmMemberToolCall,
   SwarmRunSnapshot,
   SwarmRunTotals,
 } from '@moonshot-ai/protocol';

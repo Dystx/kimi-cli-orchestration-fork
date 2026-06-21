@@ -5,12 +5,20 @@
 
 export type SwarmMemberStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
+export interface SwarmMemberToolCall {
+  readonly toolName: string;
+  /** Best-effort single-argument summary (last path segment, first command token, etc.). */
+  readonly argsSummary?: string;
+}
+
 export interface SwarmMemberSnapshot {
   readonly memberId: string;
   readonly status: SwarmMemberStatus;
   readonly startedAt?: number;
   readonly completedAt?: number;
   readonly errorMessage?: string;
+  /** Most-recent in-flight tool call; cleared on `tool.result`. */
+  readonly currentToolCall?: SwarmMemberToolCall;
 }
 
 export interface SwarmRunTotals {
