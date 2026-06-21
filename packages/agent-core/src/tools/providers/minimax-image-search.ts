@@ -182,8 +182,8 @@ function waitExit(child: {
       resolve(child.exitCode);
       return;
     }
-    child.once('exit', (code) => resolve(code));
-    child.once('error', () => resolve(null));
+    child.once('exit', (code) => { resolve(code); });
+    child.once('error', () => { resolve(null); });
   });
 }
 

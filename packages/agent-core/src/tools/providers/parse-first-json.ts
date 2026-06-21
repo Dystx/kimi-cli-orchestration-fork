@@ -27,7 +27,7 @@ export function parseFirstJson<T = unknown>(text: string): T | undefined {
   // top-level `{` so trailing hint text is discarded.
   if (trimmed[0] !== '{' && trimmed[0] !== '[') return undefined;
 
-  const openChar = trimmed[0]!;
+  const openChar = trimmed[0];
   const closeChar = openChar === '{' ? '}' : ']';
   let depth = 0;
   let inString = false;
