@@ -12,6 +12,7 @@
 import type {
   SwarmMemberSnapshot,
   SwarmMemberStatus,
+  SwarmMemberToolCall,
   SwarmRunSnapshot,
 } from '@moonshot-ai/kimi-code-sdk';
 import chalk from 'chalk';
@@ -19,16 +20,12 @@ import chalk from 'chalk';
 // Re-export the SDK types so consumers (`SwarmProgressController`,
 // `useSwarmProgress` callers) can keep their existing import sites
 // pointing at this module if they prefer.
-export type { SwarmMemberSnapshot, SwarmMemberStatus, SwarmRunSnapshot };
-
-// Structural view of `@moonshot-ai/protocol`'s `SwarmMemberToolCall`.
-// `@moonshot-ai/kimi-code-sdk` does not (yet) re-export the type, so this
-// module accepts the snapshot's `currentToolCall` field by structural
-// compatibility rather than a nominal import.
-interface MemberToolCallShape {
-  readonly toolName: string;
-  readonly argsSummary?: string;
-}
+export type {
+  SwarmMemberSnapshot,
+  SwarmMemberStatus,
+  SwarmMemberToolCall,
+  SwarmRunSnapshot,
+};
 
 const STATUS_ICON: Record<SwarmMemberStatus, string> = {
   queued: '·',
@@ -53,7 +50,7 @@ function colorizeForStatus(status: SwarmMemberStatus, text: string): string {
   }
 }
 
-function formatActivity(call: MemberToolCallShape): string {
+function formatActivity(call: SwarmMemberToolCall): string {
   return call.argsSummary !== undefined
     ? `[${call.toolName} ${call.argsSummary}]`
     : `[${call.toolName}]`;
