@@ -1,6 +1,7 @@
 import type {
   SwarmMemberSnapshot,
   SwarmMemberStatus as ProtocolMemberStatus,
+  SwarmMemberToolCall,
   SwarmRunSnapshot,
 } from '@moonshot-ai/protocol';
 
@@ -8,6 +9,7 @@ import type { OrchestrationEvent } from '../../session/orchestration/types';
 import type { SwarmRunSummary } from '../../session';
 import type { SubagentResult } from '../../session/subagent-batch';
 import type { AgentSwarmSpec } from '../../tools/builtin/collaboration/agent-swarm';
+import { summarizeArgs } from './args-summary';
 
 export type SwarmMemberStatus =
   | 'spawned'
@@ -18,13 +20,26 @@ export type SwarmMemberStatus =
   | 'cancelled';
 
 export interface SwarmMember {
-  subagentId: string;
+  /** Coordinator-stable id (the `registerMember` key). Stays put across retries. */
+  readonly id: string;
+  /**
+   * Orchestration id assigned by the subagent host when the member is spawned.
+   * Populated lazily when the `subagent.spawned` event arrives; until then
+   * the member is just `queued` from the orchestration's point of view.
+   */
+  subagentId?: string;
   readonly spec: AgentSwarmSpec;
   readonly agentId?: string;
   status: SwarmMemberStatus;
   startedAt?: number;
   completedAt?: number;
   result?: SubagentResult;
+  /**
+   * Most-recent in-flight tool call surfaced on the next snapshot; cleared
+   * when the matching `tool.result` arrives. Tracker state — never exposed
+   * on `SwarmProgress`.
+   */
+  currentToolCall?: SwarmMemberToolCall;
 }
 
 export interface SwarmProgress {
@@ -80,6 +95,13 @@ function extractErrorMessage(m: SwarmMember): string | undefined {
 export class SwarmCoordinator {
   readonly runId: string;
   private readonly members = new Map<string, SwarmMember>();
+  /**
+   * Reverse lookup from orchestration id (`subagentId`) to coordinator id
+   * (`memberId`). Populated lazily when `subagent.spawned` arrives; used by
+   * the tool-call handlers (`tool.call.started`, `tool.result`) to update
+   * the right member without scanning `members`.
+   */
+  private readonly memberBySubagentId = new Map<string, string>();
   private readonly unsubscribers: Array<() => void> = [];
   private retried = new Set<string>();
   private readonly pendingCompletions = new Map<
@@ -121,8 +143,13 @@ export class SwarmCoordinator {
     this.subscribe();
   }
 
-  registerMember(subagentId: string, spec: AgentSwarmSpec, agentId?: string): void {
-    this.members.set(subagentId, { subagentId, spec, agentId, status: 'spawned' });
+  registerMember(memberId: string, spec: AgentSwarmSpec, agentId?: string): void {
+    this.members.set(memberId, {
+      id: memberId,
+      spec,
+      agentId,
+      status: 'spawned',
+    });
   }
 
   getProgress(): SwarmProgress {
@@ -151,32 +178,62 @@ export class SwarmCoordinator {
     const off = (event: string, handler: (e: OrchestrationEvent) => void) => {
       this.unsubscribers.push(hooks.on(event, handler));
     };
+    // Resolve the coordinator member for an event carrying a `subagentId`.
+    // Production goes through `subagent.spawned` first so the reverse map
+    // has the answer; tests and legacy emitters that fire only the
+    // terminal events fall back to the legacy convention where
+    // `memberId === subagentId`.
+    const memberIdFor = (subagentId: string): string | undefined =>
+      this.memberBySubagentId.get(subagentId) ?? (this.members.has(subagentId) ? subagentId : undefined);
+
+    off('subagent.spawned', (e) => {
+      const subagentId = getSubagentId(e);
+      if (subagentId === undefined) return;
+      // Best-effort: link to the first registered-but-unstarted member
+      // (status === 'spawned' from the protocol side reads as `queued`).
+      // Members are registered by the call site before their host spawns
+      // them, so iterating in insertion order is the natural FIFO pairing.
+      for (const [memberId, member] of this.members.entries()) {
+        if (member.subagentId === undefined && member.status === 'spawned') {
+          member.subagentId = subagentId;
+          this.memberBySubagentId.set(subagentId, memberId);
+          break;
+        }
+      }
+      this.emitSnapshot();
+    });
 
     off('subagent.started', (e) => {
-      const id = getSubagentId(e);
-      if (id === undefined) return;
-      const m = this.members.get(id);
+      const subagentId = getSubagentId(e);
+      if (subagentId === undefined) return;
+      const memberId = memberIdFor(subagentId);
+      if (memberId === undefined) return;
+      const m = this.members.get(memberId);
       if (m === undefined) return;
       m.status = 'started';
       m.startedAt = Date.now();
-      this.resolvePendingCompletions(id);
+      this.resolvePendingCompletions(memberId);
       this.emitSnapshot();
     });
 
     off('subagent.suspended', (e) => {
-      const id = getSubagentId(e);
-      if (id === undefined) return;
-      const m = this.members.get(id);
+      const subagentId = getSubagentId(e);
+      if (subagentId === undefined) return;
+      const memberId = memberIdFor(subagentId);
+      if (memberId === undefined) return;
+      const m = this.members.get(memberId);
       if (m === undefined) return;
       m.status = 'suspended';
-      this.resolvePendingCompletions(id);
+      this.resolvePendingCompletions(memberId);
       this.emitSnapshot();
     });
 
     off('subagent.completed', (e) => {
-      const id = getSubagentId(e);
-      if (id === undefined) return;
-      const m = this.members.get(id);
+      const subagentId = getSubagentId(e);
+      if (subagentId === undefined) return;
+      const memberId = memberIdFor(subagentId);
+      if (memberId === undefined) return;
+      const m = this.members.get(memberId);
       if (m === undefined) return;
       // Production emits `subagent.completed` via `OrchestrationHooks.emit`
       // with the body nested under `payload.resultSummary`. The legacy flat
@@ -191,14 +248,16 @@ export class SwarmCoordinator {
       if (payload?.resultSummary !== undefined) {
         m.result = { result: payload.resultSummary } as unknown as SubagentResult;
       }
-      this.resolvePendingCompletions(id);
+      this.resolvePendingCompletions(memberId);
       this.emitSnapshot();
     });
 
     off('subagent.failed', (e) => {
-      const id = getSubagentId(e);
-      if (id === undefined) return;
-      const m = this.members.get(id);
+      const subagentId = getSubagentId(e);
+      if (subagentId === undefined) return;
+      const memberId = memberIdFor(subagentId);
+      if (memberId === undefined) return;
+      const m = this.members.get(memberId);
       if (m === undefined) return;
       m.status = 'failed';
       m.completedAt = Date.now();
@@ -222,10 +281,38 @@ export class SwarmCoordinator {
       // member could be retried into a non-failed state while still
       // remembering that it once errored, and we want that history to be
       // visible to callers inspecting `SwarmRunSummary.errorCount`.
-      const diag = this.diagnosticState.get(id) ?? {};
+      const diag = this.diagnosticState.get(memberId) ?? {};
       diag.lastError = errorInstance;
-      this.diagnosticState.set(id, diag);
-      this.resolvePendingCompletions(id);
+      this.diagnosticState.set(memberId, diag);
+      this.resolvePendingCompletions(memberId);
+      this.emitSnapshot();
+    });
+
+    off('tool.call.started', (e) => {
+      const payload = (e as { payload?: { subagentId?: unknown; toolName?: unknown; args?: unknown } }).payload;
+      const subagentId = payload?.subagentId;
+      if (typeof subagentId !== 'string') return;
+      const memberId = this.memberBySubagentId.get(subagentId);
+      if (memberId === undefined) return;
+      const m = this.members.get(memberId);
+      if (m === undefined) return;
+      const toolName = typeof payload?.toolName === 'string' ? payload.toolName : '<unknown>';
+      m.currentToolCall = {
+        toolName,
+        argsSummary: typeof payload?.toolName === 'string' ? summarizeArgs(payload.toolName, payload?.args) : undefined,
+      };
+      this.emitSnapshot();
+    });
+
+    off('tool.result', (e) => {
+      const payload = (e as { payload?: { subagentId?: unknown } }).payload;
+      const subagentId = payload?.subagentId;
+      if (typeof subagentId !== 'string') return;
+      const memberId = this.memberBySubagentId.get(subagentId);
+      if (memberId === undefined) return;
+      const m = this.members.get(memberId);
+      if (m === undefined || m.currentToolCall === undefined) return;
+      m.currentToolCall = undefined;
       this.emitSnapshot();
     });
   }
@@ -236,40 +323,44 @@ export class SwarmCoordinator {
     // Mark any 'spawned' or 'started' members as cancelled immediately;
     // 'completed'/'failed'/'suspended' members stay as-is.
     const now = Date.now();
-    for (const m of this.members.values()) {
+    for (const [memberId, m] of this.members.entries()) {
       if (m.status === 'spawned' || m.status === 'started') {
         m.status = 'cancelled';
         m.completedAt = now;
       }
-      this.resolvePendingCompletions(m.subagentId);
+      this.resolvePendingCompletions(memberId);
     }
     this.emitSnapshot();
   }
 
   async retryFailed(): Promise<readonly SubagentResult[]> {
     if (this.disposed) return [];
-    const failed = Array.from(this.members.values()).filter(
-      (m) => m.status === 'failed' && !this.retried.has(m.subagentId),
+    const failed = Array.from(this.members.entries()).filter(
+      ([, m]) => m.status === 'failed' && !this.retried.has(m.id),
     );
     if (failed.length === 0) return [];
 
-    for (const m of failed) {
-      this.retried.add(m.subagentId);
+    for (const [memberId, m] of failed) {
+      this.retried.add(memberId);
       try {
         const handle = await this.agent.session.subagentHost.spawn({
           spec: m.spec,
           runInBackground: false,
         });
-        // Re-key the Map under the new id so subsequent subagent.* events
-        // can find and update this member.
-        this.members.delete(m.subagentId);
+        // Map key is the coordinator member id — it stays put across retries.
+        // Just point the orchestration id at the new spawn so subsequent
+        // `subagent.*` and tool events route back here.
+        if (m.subagentId !== undefined) {
+          this.memberBySubagentId.delete(m.subagentId);
+        }
         m.subagentId = handle.subagentId;
         m.status = 'spawned';
         m.completedAt = undefined;
-        this.members.set(m.subagentId, m);
+        m.currentToolCall = undefined;
+        this.memberBySubagentId.set(handle.subagentId, memberId);
       } catch (error) {
         this.agent.log.warn('SwarmCoordinator.retryFailed spawn error', {
-          subagentId: m.subagentId,
+          memberId,
           error,
         });
         m.status = 'failed';
@@ -373,6 +464,7 @@ export class SwarmCoordinator {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
     this.members.clear();
+    this.memberBySubagentId.clear();
     this.retried.clear();
 
     this.onDispose?.({
@@ -393,11 +485,12 @@ export class SwarmCoordinator {
   // `recordSwarmRun` for the history registry.
   private buildSnapshot(): SwarmRunSnapshot {
     const members: SwarmMemberSnapshot[] = Array.from(this.members.values()).map((m) => ({
-      memberId: m.subagentId,
+      memberId: m.id,
       status: toProtocolStatus(m.status),
       startedAt: m.startedAt,
       completedAt: m.completedAt,
       errorMessage: extractErrorMessage(m),
+      currentToolCall: m.currentToolCall,
     }));
     const totals = { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0 };
     for (const m of members) {
