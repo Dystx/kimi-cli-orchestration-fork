@@ -1,6 +1,7 @@
-import type { AgentSwarmSpec } from '../../tools/builtin/collaboration/agent-swarm';
+import type { OrchestrationEvent } from '../../session/orchestration/types';
 import type { SwarmRunSummary } from '../../session';
 import type { SubagentResult } from '../../session/subagent-batch';
+import type { AgentSwarmSpec } from '../../tools/builtin/collaboration/agent-swarm';
 
 export type SwarmMemberStatus =
   | 'spawned'
@@ -61,7 +62,9 @@ export class SwarmCoordinator {
     runId: string,
     private readonly agent: {
       session: {
-        orchestrationHooks: { on(event: string, handler: (e: unknown) => void): () => void };
+        orchestrationHooks: {
+          on(event: string, handler: (e: OrchestrationEvent) => void): () => void;
+        };
         subagentHost: {
           spawn(options: unknown): Promise<{ subagentId: string }>;
         };
@@ -103,10 +106,8 @@ export class SwarmCoordinator {
 
   subscribe(): void {
     if (this.disposed) return;
-    const hooks = this.agent.session.orchestrationHooks as unknown as {
-      on(event: string, handler: (e: unknown) => void): () => void;
-    };
-    const off = (event: string, handler: (e: unknown) => void) => {
+    const hooks = this.agent.session.orchestrationHooks;
+    const off = (event: string, handler: (e: OrchestrationEvent) => void) => {
       this.unsubscribers.push(hooks.on(event, handler));
     };
 

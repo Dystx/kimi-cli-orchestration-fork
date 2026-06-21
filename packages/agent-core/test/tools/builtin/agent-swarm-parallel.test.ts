@@ -13,10 +13,10 @@
  * resolver firing.
  *
  * `orchestrationHooks.on` retains subscribers in a Map so the coordinator's
- * `subscribe()` actually receives `subagent.completed` notifications. The
- * proposed template's `vi.fn(() => () => undefined)` would have left the
- * coordinator empty and made `waitFor` time out at 300s — this test instead
- * mirrors the working wiring used in `agent-swarm-coordinator.test.ts`.
+ * `subscribe()` actually receives `subagent.completed` notifications. A
+ * `vi.fn(() => () => undefined)` would have left the coordinator empty and
+ * made `awaitCompletion` hang forever — this test instead mirrors the
+ * working wiring used in `agent-swarm-coordinator.test.ts`.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -43,12 +43,12 @@ describe('AgentSwarmTool parallel dispatch', () => {
       });
     });
 
-    // `AgentSwarmTool.execution` wraps `session.orchestrationHooks.on` with a
-    // defensive shim that forwards (event, handler) subscriptions. The
-    // coordinator's `subscribe()` registers `subagent.started/completed/failed`
-    // handlers via that shim — they only fire if we actually retain them
-    // here and dispatch on `emit`. Without that wiring `waitFor` would never
-    // observe a terminal state and the test would time out at 300s.
+    // `AgentSwarmTool.execution` reads `session.orchestrationHooks.on`
+    // directly — the coordinator's `subscribe()` registers
+    // `subagent.started/completed/failed` handlers via that contract, so
+    // they only fire if we actually retain them here and dispatch on
+    // `emit`. Without that wiring `awaitCompletion` would never observe a
+    // terminal state and the test would time out at 300s.
     const handlers = new Map<string, Array<(event: unknown) => void>>();
     const orchestrationHooks = {
       on(event: string, handler: (event: unknown) => void): () => void {
@@ -100,13 +100,13 @@ describe('AgentSwarmTool parallel dispatch', () => {
     // microtask, so we must drain it before emitting `subagent.completed`:
     // the coordinator's handler bails out via `this.members.get(id)` when
     // no member is registered yet, which would leave members in `spawned`
-    // state and hang `waitFor` until its 300s timeout.
+    // state and `awaitCompletion` would never settle.
     for (const r of resolves) r();
     await new Promise((r) => setTimeout(r, 0));
 
-    // Fire completion events. The next `waitFor` tick (≤100ms later) sees
-    // the terminal status and resolves; `runSwarm` then renders the result
-    // and the outer execution returns.
+    // Fire completion events. The coordinator's handler runs synchronously
+    // and resolves the per-member `awaitCompletion` promise; `runSwarm`
+    // then renders the result and the outer execution returns.
     for (const agentId of completionTriggers) {
       orchestrationHooks.emit({
         type: 'subagent.completed',

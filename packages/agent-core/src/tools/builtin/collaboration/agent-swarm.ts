@@ -134,14 +134,7 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
               // field — the AgentSwarmTool already owns a `SessionSubagentHost`
               // instance so we hand it through.
               session: {
-                // SwarmCoordinator's structural type widens the handler to
-                // `(e: unknown) => void`; the real `OrchestrationHooks.on()`
-                // signature uses `(e: OrchestrationEvent) => void`. Narrow via
-                // an `unknown` cast — the coordinator itself does the same
-                // structural narrowing inside `subscribe()`.
-                orchestrationHooks: this.session.orchestrationHooks as unknown as {
-                  on(event: string, handler: (e: unknown) => void): () => void;
-                },
+                orchestrationHooks: this.session.orchestrationHooks,
                 // `SessionSubagentHost.spawn` returns `SubagentHandle` (with
                 // `agentId`); the coordinator's structural type expects
                 // `{ subagentId }`. Retry isn't wired in this revision, so we
