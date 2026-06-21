@@ -581,6 +581,15 @@ export interface SessionStatusSnapshot {
     readonly skillsSuppressed: number;
     readonly eventsEmitted: number;
   };
+  readonly orchestrator?: {
+    readonly policies: readonly {
+      readonly name: string;
+      readonly fireCount: number;
+      readonly lastFiredAt?: number;
+      readonly lastError?: { readonly message: string; readonly at: number };
+    }[];
+    readonly totals: { readonly injections: number; readonly errors: number };
+  };
 }
 
 export interface SessionStatusUpdatedEvent {
