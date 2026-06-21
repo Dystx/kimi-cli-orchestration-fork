@@ -58,6 +58,7 @@ import { BackgroundTaskController } from './background-task-controller';
 import { GoalEventController } from './goal-event-controller';
 import { McpStatusController } from './mcp-status-controller';
 import { CompactionController } from './compaction-controller';
+import { SwarmProgressController } from './swarm-progress-controller';
 import type {
   AppState,
   LivePaneState,
@@ -102,6 +103,7 @@ export class SessionEventHandler {
   readonly goalController: GoalEventController;
   readonly mcpController: McpStatusController;
   readonly compactionController: CompactionController;
+  readonly swarmProgressController: SwarmProgressController;
 
   // Backward-compatible accessors for tests and external consumers.
   get backgroundTasks(): Map<string, import('@moonshot-ai/kimi-code-sdk').BackgroundTaskInfo> {
@@ -120,6 +122,7 @@ export class SessionEventHandler {
     );
     this.mcpController = new McpStatusController(host);
     this.compactionController = new CompactionController(host);
+    this.swarmProgressController = new SwarmProgressController(host);
     this.subAgentEventHandler = new SubAgentEventHandler(host, {
       backgroundTasks: this.backgroundTaskController.backgroundTasks,
       backgroundTaskTranscriptedTerminal: this.backgroundTaskController.backgroundTaskTranscriptedTerminal,
@@ -138,6 +141,7 @@ export class SessionEventHandler {
     this.subAgentEventHandler.resetRuntimeState();
     this.goalController.resetRuntimeState();
     this.mcpController.resetRuntimeState();
+    this.swarmProgressController.resetRuntimeState();
     this.renderedSkillActivationIds.clear();
     this.currentTurnHasAssistantText = false;
   }
@@ -255,6 +259,7 @@ export class SessionEventHandler {
       case 'cron.fired': this.handleCronFired(event); break;
       case 'mcp.server.status': this.mcpController.handleServerStatus(event.server); break;
       case 'session.status': this.host.setAppState({ statusSnapshot: event.snapshot }); break;
+      case 'swarm.run.snapshot': this.swarmProgressController.handleEvent(event); break;
       case 'tool.list.updated': break;
       case "subagent.progress": break;
       default: break;

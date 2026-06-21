@@ -106,6 +106,14 @@ export type {
 
 export type { CronFiredEvent } from '@moonshot-ai/agent-core';
 
+// Live swarm-run snapshots emitted by the coordinator for every transition
+// (queued/running/completed/failed/cancelled). The SDK re-exports both the
+// raw event and the structural `SwarmRunSnapshot` payload so consumers can
+// subscribe via the standard `onEvent` pipeline without reaching for
+// agent-core directly.
+export type { SwarmRunSnapshotEvent } from '@moonshot-ai/agent-core';
+export type { SwarmRunSnapshot } from '@moonshot-ai/agent-core';
+
 export type MaybePromise<T> = T | Promise<T>;
 
 export type ApprovalHandler = (request: ApprovalRequest) => MaybePromise<ApprovalResponse>;

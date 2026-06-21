@@ -1085,9 +1085,11 @@ export class Session {
 
   /**
    * Internal entry point for the swarm coordinator. Routes the snapshot
-   * through the active/history registries and then fans it out to every
-   * live subscriber. A `completedAt` snapshot simultaneously removes the
-   * run from `activeRuns` and records a `SwarmRunSummary` so the
+   * through the active/history registries, fires a `swarm.run.snapshot` event
+   * through the RPC layer (so SDK consumers like the TUI can subscribe via
+   * the standard event pipeline), and finally fans the snapshot out to
+   * every direct subscriber. A `completedAt` snapshot simultaneously removes
+   * the run from `activeRuns` and records a `SwarmRunSummary` so the
    * `getSwarmRunHistory` accessor can return it without any extra wiring
    * from the coordinator side.
    */
@@ -1107,6 +1109,15 @@ export class Session {
     } else {
       this.activeRuns.set(snapshot.runId, snapshot);
     }
+    // Fan the snapshot out to SDK/TUI consumers over the existing event pipe.
+    // The RPC layer (`SDKSessionRPC.emitEvent`) takes `AgentEvent` and tags the
+    // outgoing wire envelope with `sessionId`; we only supply the agent-side
+    // fields. The snapshot itself rides inside the typed payload.
+    void this.rpc.emitEvent({
+      type: 'swarm.run.snapshot',
+      agentId: 'main',
+      snapshot,
+    });
     for (const cb of this.swarmSubscribers) {
       try {
         cb(snapshot);

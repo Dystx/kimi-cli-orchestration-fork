@@ -73,11 +73,10 @@ function colorizeForStatus(status: SwarmMemberStatus, text: string): string {
 
 export function SwarmProgressMessage({ snapshot }: { snapshot: SwarmRunSnapshot }): string[] {
   const { totals, memberCount, runId, members } = snapshot;
-  const lines: string[] = [];
-  lines.push(chalk.bold(`Swarm ${runId}`));
-  lines.push(
+  const lines: string[] = [
+    chalk.bold(`Swarm ${runId}`),
     ` ${totals.completed}/${memberCount} done · ${totals.running} running · ${totals.failed} failed · ${totals.cancelled} cancelled`,
-  );
+  ];
   for (const m of members) {
     const detail = m.errorMessage !== undefined ? ` — ${m.errorMessage}` : '';
     lines.push(colorizeForStatus(m.status, `  ${STATUS_ICON[m.status]} ${m.memberId}${detail}`));

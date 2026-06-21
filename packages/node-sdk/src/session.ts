@@ -28,6 +28,7 @@ import type {
   SessionSummary,
   SessionUsage,
   SkillSummary,
+  SwarmRunSnapshot,
   Unsubscribe,
 } from '#/types';
 
@@ -51,6 +52,26 @@ export class Session {
   private readonly rpc: SDKRpcClientBase;
   private readonly onClose?: (() => void | Promise<void>) | undefined;
   private closed = false;
+  /**
+   * Cache of in-flight swarm snapshots keyed by `runId`. Populated by
+   * `subscribeSwarmRuns` and read by `getActiveSwarmRun`. The cache is
+   * intentionally not persisted across sessions — when the CLI starts a
+   * new session, it gets a fresh `Session` and an empty map. The agent
+   * side (which owns the canonical registry) is the source of truth; this
+   * map is just a local view that survives long enough for the TUI to
+   * render the active run.
+   */
+  private readonly activeSwarmRuns: Map<string, SwarmRunSnapshot> = new Map();
+  /**
+   * Cache of completed swarm snapshots keyed by `runId`. Populated by
+   * `subscribeSwarmRuns` when a `completedAt`-bearing snapshot arrives and
+   * read by `getSwarmRunHistory`. Like `activeSwarmRuns`, this is a
+   * session-local mirror of the agent-side registry — populated only by
+   * events received after subscription. The agent is the source of truth;
+   * the SDK caches snapshots long enough for the TUI's `/diag` view to
+   * show "what just finished" without a round-trip.
+   */
+  private readonly completedSwarmRuns: Map<string, SwarmRunSnapshot> = new Map();
 
   constructor(options: SessionOptions) {
     this.id = options.id;
@@ -81,6 +102,71 @@ export class Session {
         listener(event);
       }
     });
+  }
+
+  /**
+   * Subscribe to live swarm-run snapshots. The coordinator fires a
+   * `swarm.run.snapshot` event on every transition (queued/running/
+   * completed/failed/cancelled), and the SDK filters that stream down to
+   * the bare snapshot. The unsubscribe returned by `subscribeSwarmRuns`
+   * tears the listener down without holding a reference to the session.
+   *
+   * The cache (`activeSwarmRuns`) is also updated on every event so that
+   * `getActiveSwarmRun` can answer a `runId` query without re-fanning the
+   * event stream. `completedAt`-bearing snapshots are removed from the
+   * cache to keep `getActiveSwarmRun` aligned with the agent-core
+   * definition of "in-flight".
+   */
+  subscribeSwarmRuns(cb: (snapshot: SwarmRunSnapshot) => void): Unsubscribe {
+    this.ensureOpen();
+    return this.onEvent((event) => {
+      if (event.type !== 'swarm.run.snapshot') return;
+      const snapshot = event.snapshot;
+      if (snapshot.completedAt !== undefined) {
+        this.activeSwarmRuns.delete(snapshot.runId);
+        this.completedSwarmRuns.set(snapshot.runId, snapshot);
+      } else {
+        this.activeSwarmRuns.set(snapshot.runId, snapshot);
+      }
+      cb(snapshot);
+    });
+  }
+
+  /**
+   * Return the latest snapshot for an in-flight swarm run. With no
+   * `runId`, returns the most recently started active run. Returns
+   * `undefined` once the coordinator has emitted a `completedAt` snapshot
+   * for every active run. The cache is populated by `subscribeSwarmRuns`,
+   * so this method only returns a value if the caller has subscribed (or
+   * the session has replayed a snapshot during resume — the SDK does not
+   * yet replay, see `getSwarmRunHistory` for completed-run inspection).
+   */
+  getActiveSwarmRun(runId?: string): SwarmRunSnapshot | undefined {
+    this.ensureOpen();
+    if (runId !== undefined) return this.activeSwarmRuns.get(runId);
+    if (this.activeSwarmRuns.size === 0) return undefined;
+    let latest: SwarmRunSnapshot | undefined;
+    for (const snapshot of this.activeSwarmRuns.values()) {
+      if (latest === undefined || snapshot.startedAt > latest.startedAt) {
+        latest = snapshot;
+      }
+    }
+    return latest;
+  }
+
+  /**
+   * Return the completed swarm-run snapshots observed by `subscribeSwarmRuns`
+   * during this session, sorted by `startedAt` descending. Like
+   * `getActiveSwarmRun`, this is a session-local cache — it only contains
+   * snapshots received via the `swarm.run.snapshot` event stream, so a fresh
+   * SDK that hasn't subscribed will return an empty array until the first
+   * run completes.
+   */
+  getSwarmRunHistory(): readonly SwarmRunSnapshot[] {
+    this.ensureOpen();
+    return Array.from(this.completedSwarmRuns.values()).toSorted(
+      (a, b) => b.startedAt - a.startedAt,
+    );
   }
 
   setApprovalHandler(handler: ApprovalHandler | undefined): void {
@@ -408,6 +494,8 @@ export class Session {
     try {
       await this.rpc.closeSession({ sessionId: this.id });
     } finally {
+      this.activeSwarmRuns.clear();
+      this.completedSwarmRuns.clear();
       this.rpc.clearSessionHandlers(this.id);
       await this.onClose?.();
     }
