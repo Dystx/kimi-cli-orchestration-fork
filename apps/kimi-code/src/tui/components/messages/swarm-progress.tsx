@@ -21,6 +21,15 @@ import chalk from 'chalk';
 // pointing at this module if they prefer.
 export type { SwarmMemberSnapshot, SwarmMemberStatus, SwarmRunSnapshot };
 
+// Structural view of `@moonshot-ai/protocol`'s `SwarmMemberToolCall`.
+// `@moonshot-ai/kimi-code-sdk` does not (yet) re-export the type, so this
+// module accepts the snapshot's `currentToolCall` field by structural
+// compatibility rather than a nominal import.
+interface MemberToolCallShape {
+  readonly toolName: string;
+  readonly argsSummary?: string;
+}
+
 const STATUS_ICON: Record<SwarmMemberStatus, string> = {
   queued: '·',
   running: '◐',
@@ -44,6 +53,12 @@ function colorizeForStatus(status: SwarmMemberStatus, text: string): string {
   }
 }
 
+function formatActivity(call: MemberToolCallShape): string {
+  return call.argsSummary !== undefined
+    ? `[${call.toolName} ${call.argsSummary}]`
+    : `[${call.toolName}]`;
+}
+
 export function SwarmProgressMessage({ snapshot }: { snapshot: SwarmRunSnapshot }): string[] {
   const { totals, memberCount, runId, members } = snapshot;
   const lines: string[] = [
@@ -52,7 +67,12 @@ export function SwarmProgressMessage({ snapshot }: { snapshot: SwarmRunSnapshot 
   ];
   for (const m of members) {
     const detail = m.errorMessage !== undefined ? ` — ${m.errorMessage}` : '';
-    lines.push(colorizeForStatus(m.status, `  ${STATUS_ICON[m.status]} ${m.memberId}${detail}`));
+    const activity = m.currentToolCall !== undefined
+      ? ' ' + chalk.dim(formatActivity(m.currentToolCall))
+      : '';
+    lines.push(
+      colorizeForStatus(m.status, `  ${STATUS_ICON[m.status]} ${m.memberId}${detail}`) + activity,
+    );
   }
   return lines;
 }
