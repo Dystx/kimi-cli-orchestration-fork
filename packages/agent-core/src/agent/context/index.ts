@@ -20,7 +20,13 @@ const TOOL_EMPTY_STATUS = '<system>Tool output is empty.</system>';
 const TOOL_EMPTY_ERROR_STATUS =
   '<system>ERROR: Tool execution failed. Tool output is empty.</system>';
 const TOOL_OUTPUT_EMPTY_TEXT = 'Tool output is empty.';
+const TOOL_INTERRUPTED_ON_RESUME_OUTPUT =
+  'Tool execution was interrupted before its result was recorded. Do not assume the tool completed successfully.';
 
+// Invariant: _history must not contain an unresolved tool call exchange except
+// at the tail. When the tail is unresolved, pendingToolResultIds is exactly the
+// set of missing tool result ids for that tail exchange; appendMessage keeps
+// later messages in deferredMessages until those ids are resolved.
 export class ContextMemory {
   private _history: ContextMessage[] = [];
   private _tokenCount = 0;
@@ -56,6 +62,16 @@ export class ContextMemory {
       content: [{ type: 'text', text }],
       toolCalls: [],
       origin,
+    });
+  }
+
+  appendLocalCommandStdout(content: string): void {
+    const text = `<local-command-stdout>\n${content.trim()}\n</local-command-stdout>`;
+    this.appendMessage({
+      role: 'user',
+      content: [{ type: 'text', text }],
+      toolCalls: [],
+      origin: { kind: 'injection', variant: 'local-command-stdout' },
     });
   }
 
@@ -210,6 +226,24 @@ export class ContextMemory {
     this.pushHistory(...trimTrailingOpenToolExchange(source.project(source.history)));
   }
 
+  finishResume(): void {
+    const interruptedToolCallIds = [...this.pendingToolResultIds];
+    this.openSteps.clear();
+    if (interruptedToolCallIds.length === 0) return;
+
+    for (const toolCallId of interruptedToolCallIds) {
+      this.appendLoopEvent({
+        type: 'tool.result',
+        parentUuid: toolCallId,
+        toolCallId,
+        result: {
+          output: TOOL_INTERRUPTED_ON_RESUME_OUTPUT,
+          isError: true,
+        },
+      });
+    }
+  }
+
   appendLoopEvent(event: LoopRecordedEvent): void {
     this.agent.records.logRecord({
       type: 'context.append_loop_event',
@@ -231,13 +265,26 @@ export class ContextMemory {
         this.openSteps.delete(event.uuid);
         if (event.usage !== undefined) {
           const openStepIndex = openStep === undefined ? -1 : this._history.indexOf(openStep);
-          this._tokenCount =
+          const coveredCount =
+            openStepIndex === -1 ? this._history.length : openStepIndex + 1;
+          const totalUsage =
             event.usage.inputCacheRead +
             event.usage.inputCacheCreation +
             event.usage.inputOther +
             event.usage.output;
-          this.tokenCountCoveredMessageCount =
-            openStepIndex === -1 ? this._history.length : openStepIndex + 1;
+          if (totalUsage > 0) {
+            this._tokenCount = totalUsage;
+          } else {
+            // The provider reported zero usage (e.g. content filter). Do not
+            // overwrite the accumulated context token count with 0; add an
+            // estimate for the newly covered messages so the invariant between
+            // _tokenCount and tokenCountCoveredMessageCount stays intact.
+            const previousCoveredCount = this.tokenCountCoveredMessageCount;
+            this._tokenCount += estimateTokensForMessages(
+              this._history.slice(previousCoveredCount, coveredCount),
+            );
+          }
+          this.tokenCountCoveredMessageCount = coveredCount;
         }
         this.flushDeferredMessagesIfToolExchangeClosed();
         return;

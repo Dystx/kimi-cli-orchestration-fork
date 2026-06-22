@@ -310,6 +310,9 @@ export class SessionEventHandler {
     if (event.reason === 'cancelled') {
       this.markActiveAgentSwarmsCancelled();
     }
+    if (event.reason === 'filtered') {
+      this.host.showStatus('Turn stopped: provider safety policy blocked the response.', 'error');
+    }
     const todos = this.host.state.todoPanel.getTodos();
     if (todos.length > 0 && todos.every((t) => t.status === 'done')) {
       this.host.streamingUI.setTodoList([]);
@@ -340,6 +343,15 @@ export class SessionEventHandler {
   private handleStepCompleted(event: TurnStepCompletedEvent): void {
     this.host.streamingUI.flushNow();
     this.maybeShowDebugTiming(event);
+
+    if (event.providerFinishReason === 'filtered') {
+      this.host.showNotice(
+        'Provider safety policy blocked the response.',
+        `The model output was filtered (${event.rawFinishReason ?? 'content_filter'}).`,
+      );
+      return;
+    }
+
     if (event.finishReason !== 'max_tokens') return;
 
     const truncatedCount = this.host.streamingUI.markStepTruncated(
@@ -621,5 +633,146 @@ export class SessionEventHandler {
 
   retryQueuedGoalPromotion(): void {
     this.goalController.retryQueuedGoalPromotion();
+  }
+
+  private handleCompactionEnd(
+    event: CompactionCompletedEvent,
+    sendQueued: (item: QueuedMessage) => void,
+  ): void {
+    this.host.streamingUI.endCompaction(event.result.tokensBefore, event.result.tokensAfter);
+    this.finishCompaction(sendQueued);
+  }
+
+  private handleCompactionCancel(
+    _event: CompactionCancelledEvent,
+    sendQueued: (item: QueuedMessage) => void,
+  ): void {
+    this.host.streamingUI.cancelCompaction();
+    this.finishCompaction(sendQueued);
+  }
+
+  private finishCompaction(sendQueued: (item: QueuedMessage) => void): void {
+    const hasActiveTurn = this.host.streamingUI.hasActiveTurn();
+    if (!hasActiveTurn) {
+      this.host.setAppState({
+        isCompacting: false,
+        streamingPhase: 'idle',
+      });
+      this.host.resetLivePane();
+      const next = this.host.shiftQueuedMessage();
+      if (next !== undefined) {
+        setTimeout(() => {
+          sendQueued(next);
+        }, 0);
+      }
+    } else {
+      this.host.setAppState({ isCompacting: false });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Background task lifecycle
+  // ---------------------------------------------------------------------------
+
+  private handleBackgroundTaskEvent(
+    event: BackgroundTaskStartedEvent | BackgroundTaskTerminatedEvent,
+  ): void {
+    const { state } = this.host;
+    const { info } = event;
+    const previous = this.backgroundTasks.get(info.taskId);
+    this.backgroundTasks.set(info.taskId, info);
+
+    const viewer = state.tasksBrowser?.viewer;
+    if (viewer !== undefined && viewer.taskId === info.taskId) {
+      void this.host.tasksBrowserController.refreshOutputViewer({ silent: true });
+    }
+
+    const isTerminal =
+      info.status === 'completed' ||
+      info.status === 'failed' ||
+      info.status === 'timed_out' ||
+      info.status === 'killed' ||
+      info.status === 'lost';
+
+    if (event.type === 'background.task.started') {
+      if (info.kind === 'agent') {
+        // A foreground subagent detached via Ctrl+B: flip its card to
+        // `◐ backgrounded` so it doesn't look like it completed.
+        this.host.streamingUI.markSubagentBackgrounded(info.agentId);
+        this.syncBackgroundTaskBadge();
+        this.host.tasksBrowserController.repaint();
+        return;
+      }
+      this.appendBackgroundTaskEntry(info);
+      this.syncBackgroundTaskBadge();
+      this.host.tasksBrowserController.repaint();
+      return;
+    }
+
+    if (event.type === 'background.task.terminated' && isTerminal) {
+      if (info.kind === 'agent') {
+        // The Agent tool's spawn-success ToolResult is not an error, so the
+        // parent toolCall card would otherwise render `✓ Completed` for any
+        // terminated bg agent — including `lost` / `failed` / `killed`.
+        // Push the actual terminal status so the card matches reality.
+        this.host.streamingUI.applyBackgroundTaskTerminalStatus({
+          agentId: info.agentId,
+          description: info.description,
+          status: info.status,
+        });
+      }
+      if (!this.backgroundTaskTranscriptedTerminal.has(info.taskId)) {
+        if (info.kind === 'process' || info.kind === 'question') {
+          this.appendBackgroundTaskEntry(info);
+        }
+        this.backgroundTaskTranscriptedTerminal.add(info.taskId);
+      }
+      this.syncBackgroundTaskBadge();
+      this.host.tasksBrowserController.repaint();
+      return;
+    }
+
+    if (previous?.status !== info.status) {
+      this.syncBackgroundTaskBadge();
+    }
+    this.host.tasksBrowserController.repaint();
+  }
+
+  private appendBackgroundTaskEntry(info: BackgroundTaskInfo): void {
+    const status = formatBackgroundTaskTranscript(info);
+    const entry: TranscriptEntry = {
+      id: nextTranscriptId(),
+      kind: 'status',
+      turnId: this.host.streamingUI.getTurnContext().turnId,
+      renderMode: 'plain',
+      content: status.headline,
+      detail: status.detail,
+      backgroundAgentStatus: status,
+    };
+    this.host.appendTranscriptEntry(entry);
+  }
+
+  private syncBackgroundTaskBadge(): void {
+    const { state } = this.host;
+    let bashTasks = 0;
+    let agentTasks = 0;
+    for (const info of this.backgroundTasks.values()) {
+      if (
+        info.status === 'completed' ||
+        info.status === 'failed' ||
+        info.status === 'timed_out' ||
+        info.status === 'killed' ||
+        info.status === 'lost'
+      ) {
+        continue;
+      }
+      if (info.kind === 'agent') {
+        agentTasks += 1;
+      } else {
+        bashTasks += 1;
+      }
+    }
+    state.footer.setBackgroundCounts({ bashTasks, agentTasks });
+    state.ui.requestRender();
   }
 }

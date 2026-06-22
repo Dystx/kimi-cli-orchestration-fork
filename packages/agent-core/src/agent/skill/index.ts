@@ -5,10 +5,12 @@ import type { ContentPart } from '@moonshot-ai/kosong';
 
 import type { Agent } from '..';
 import { ErrorCodes, KimiError } from '#/errors';
-import { isUserActivatableSkillType, type SkillRegistry } from '../../skill';
+import { isUserActivatableSkillType } from '../../skill';
 import type { SkillActivationOrigin } from '../context';
 import { renderAutoRoutedSkillPrompt, renderUserSlashSkillPrompt } from './prompt';
+import type { SkillRegistry } from './types';
 
+export type { SkillRegistry } from './types';
 export class SkillManager {
   constructor(
     protected readonly agent: Agent,
@@ -75,6 +77,7 @@ export class SkillManager {
           skillArgs,
           skillContent,
           skillSource: skill.source,
+          skillDir: skill.dir,
         }),
       },
     ];

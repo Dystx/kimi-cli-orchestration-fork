@@ -13,6 +13,7 @@ export interface CLIOptions {
   skillsDirs: string[];
   agentFile?: string | undefined;
   mcpConfigFile?: string | undefined;
+  addDirs?: string[];
 }
 
 export interface ValidatedOptions {

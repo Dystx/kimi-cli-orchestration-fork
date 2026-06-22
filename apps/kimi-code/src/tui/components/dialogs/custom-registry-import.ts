@@ -137,8 +137,9 @@ export class CustomRegistryImportDialogComponent extends Container implements Fo
     this.urlInput.focused = dialogActive && this.activeField === 'url';
     this.tokenInput.focused = dialogActive && this.activeField === 'token';
 
-    const safeWidth = Math.max(36, width);
-    const innerWidth = Math.max(10, safeWidth - 4);
+    const safeWidth = Math.max(0, width);
+    if (safeWidth <= 0) return [''];
+    const innerWidth = Math.max(1, safeWidth - 4);
     const pad = '  ';
 
     const border = (s: string): string => currentTheme.fg('primary', s);
@@ -189,6 +190,10 @@ export class CustomRegistryImportDialogComponent extends Container implements Fo
       footerLine,
     ];
 
+    if (safeWidth < 4) {
+      return ['', ...contentLines.map((line) => truncateToWidth(line, safeWidth, '…'))];
+    }
+
     const lines: string[] = [
       '',
       border('╭' + '─'.repeat(safeWidth - 2) + '╮'),
@@ -205,7 +210,7 @@ export class CustomRegistryImportDialogComponent extends Container implements Fo
     lines.push(border('╰' + '─'.repeat(safeWidth - 2) + '╯'));
     lines.push('');
 
-    return lines;
+    return lines.map((line) => truncateToWidth(line, safeWidth, '…'));
   }
 
   private toggleField(): void {

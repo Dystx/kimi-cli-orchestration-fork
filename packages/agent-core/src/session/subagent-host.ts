@@ -26,6 +26,7 @@ import type { Session } from './index';
 import type { OrchestrationHooks } from './orchestration-hooks';
 import {
   SubagentBatch,
+  resolveSwarmMaxConcurrency,
   type SubagentResult,
   type SubagentSuspendedEvent,
   type QueuedSubagentTask,
@@ -127,9 +128,14 @@ export type SubagentHandle = {
 };
 
 export class SessionSubagentHost {
-  private readonly activeChildren = new Map<string, ActiveChild>();
+  private readonly activeChildren = new Map<
+    string,
+    {
+      readonly controller: AbortController;
+      runInBackground: boolean;
+    }
+  >();
   private readonly subagentStatuses = new Map<string, SubagentStatus>();
-
   constructor(
     private readonly session: Session,
     private readonly ownerAgentId: string,
@@ -287,7 +293,8 @@ export class SessionSubagentHost {
   }
 
   async runQueued<T>(tasks: readonly QueuedSubagentTask<T>[]): Promise<Array<SubagentResult<T>>> {
-    return new SubagentBatch(this, tasks).run();
+    const maxConcurrency = resolveSwarmMaxConcurrency();
+    return new SubagentBatch(this, tasks, { maxConcurrency }).run();
   }
 
   suspended(event: SubagentSuspendedEvent): void {
@@ -339,6 +346,11 @@ export class SessionSubagentHost {
       // subagent's in-flight tools report the cause accurately to the model.
       child.controller.abort(reason);
     }
+  }
+
+  markActiveChildDetached(agentId: string): void {
+    const child = this.activeChildren.get(agentId);
+    if (child !== undefined) child.runInBackground = true;
   }
 
   async getProfileName(agentId: string): Promise<string | undefined> {
@@ -575,6 +587,7 @@ export class SessionSubagentHost {
     const context = await prepareSystemPromptContext(
       this.session.systemContextKaos(child.kaos.getcwd()),
       this.session.options.kimiHomeDir,
+      { additionalDirs: child.getAdditionalDirs() },
     );
     child.useProfile(profile, context);
     child.tools.inheritUserTools(parent.tools);
@@ -698,6 +711,9 @@ async function runChildTurnToCompletion(child: Agent, signal: AbortSignal): Prom
   const completion = await child.turn.waitForCurrentTurn(signal);
   const turnEnded = completion.event;
   if (turnEnded.reason !== 'completed') {
+    if (turnEnded.reason === 'filtered') {
+      throw new Error('Subagent turn blocked by provider safety policy');
+    }
     if (turnEnded.error?.code === ErrorCodes.PROVIDER_RATE_LIMIT) {
       throw providerRateLimitErrorFromPayload(turnEnded.error);
     }

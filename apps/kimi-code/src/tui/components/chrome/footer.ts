@@ -56,6 +56,7 @@ const TOOLBAR_TIPS: readonly ToolbarTip[] = [
   { text: 'shift+tab: plan mode' },
   { text: '/model: switch model' },
   { text: 'ctrl+s: steer mid-turn', priority: 2 },
+  { text: 'ctrl+b: background task', priority: 2 },
   { text: '/compact: compact context', priority: 2 },
   { text: 'ctrl+o: expand tool output' },
   { text: '/tasks: background tasks' },
@@ -319,6 +320,20 @@ export class FooterComponent implements Component {
    */
   setTransientHint(hint: string | null): void {
     this.transientHint = hint;
+  }
+
+  getTransientHint(): string | null {
+    return this.transientHint;
+  }
+
+  /**
+   * Sync both background-task badges with live counts. Each non-zero
+   * count produces its own bracketed badge on line 1; zeros hide them
+   * independently.
+   */
+  setBackgroundCounts(counts: { bashTasks: number; agentTasks: number }): void {
+    this.backgroundBashTaskCount = Math.max(0, counts.bashTasks);
+    this.backgroundAgentCount = Math.max(0, counts.agentTasks);
   }
 
   invalidate(): void {}

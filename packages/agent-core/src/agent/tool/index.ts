@@ -251,10 +251,10 @@ export class ToolManager {
     // server flipping to needs-auth means previous tokens were invalidated.
     this.unregisterMcpServer(entry.name);
     const oauthService = mcp.oauthService;
-    const serverUrl = mcp.getHttpServerUrl(entry.name);
+    const serverUrl = mcp.getRemoteServerUrl(entry.name);
     if (oauthService === undefined || serverUrl === undefined) {
       // Misconfiguration: a server reached needs-auth without the manager
-      // owning an OAuth service or being HTTP. Treat it as a no-op so the
+      // owning an OAuth service or being remote. Treat it as a no-op so the
       // existing failure error message keeps the user informed.
       return;
     }
@@ -380,7 +380,7 @@ export class ToolManager {
     const workspace = extendWorkspaceWithSkillRoots(
       {
         workspaceDir: cwd,
-        additionalDirs: [],
+        additionalDirs: this.agent.getAdditionalDirs(),
       },
       this.agent.skills?.registry.getSkillRoots() ?? [],
     );
@@ -436,9 +436,10 @@ export class ToolManager {
         this.agent.subagentHost &&
           new b.AgentTool(
             this.agent.subagentHost,
-            allowBackground ? background : undefined,
+            background,
             DEFAULT_AGENT_PROFILES['agent']?.subagents,
             {
+              allowBackground,
               log: this.agent.log,
               subagentCache: this.agent.subagentCache,
               cwd: this.agent.config.cwd,
@@ -495,6 +496,10 @@ export class ToolManager {
         .filter((tool) => !!tool)
         .map((tool) => [tool.name, tool] as const),
     );
+  }
+
+  refreshBuiltinTools(): void {
+    this.initializeBuiltinTools();
   }
 
   private createVideoUploader(provider: ChatProvider): b.VideoUploader | undefined {
