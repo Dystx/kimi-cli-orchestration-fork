@@ -23,9 +23,9 @@ export const FLAG_DEFINITIONS = [
   {
     id: 'skill_routing',
     title: 'Skill routing',
-    description: 'Auto-activate top-N matching skills via the Orchestrator before each step.',
+    description: 'Auto-activate top-N matching skills via the Orchestrator before each step. Opt-in: enable with KIMI_CODE_EXPERIMENTAL_SKILL_ROUTING=1.',
     env: 'KIMI_CODE_EXPERIMENTAL_SKILL_ROUTING',
-    default: true,
+    default: false,
     surface: 'core',
   },
 ] as const satisfies readonly FlagDefinitionInput[];

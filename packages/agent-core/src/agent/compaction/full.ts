@@ -317,17 +317,18 @@ export class FullCompaction {
       }
 
       const newHistory = this.agent.context.history;
-      if (newHistory.length !== originalHistory.length) {
-        // History was appended to during compaction (e.g. tool results arrived
-        // while compaction was running asynchronously). The compactedCount was
-        // computed against the old history, so applying it now could orphan
-        // tool results whose matching assistant is in the compacted prefix.
+      // Detect *destructive* history changes during the compaction round:
+      //   - length shrank → context.clear or compaction was reverted
+      //   - any existing position mutated → undo, edit, or compaction
+      // Append-only growth (length grew, prefix unchanged) is safe: the
+      // summary still describes the original prefix and the new tail sits
+      // after `originalHistory.length`. Apply the compaction normally.
+      if (newHistory.length < originalHistory.length) {
         this.cancel();
         return undefined;
       }
       for (let i = 0; i < originalHistory.length; i++) {
         if (newHistory[i] !== originalHistory[i]) {
-          // History changed during compaction, likely due to undo
           this.cancel();
           return undefined;
         }

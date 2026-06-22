@@ -48,9 +48,17 @@ The agent core gained an `Orchestrator` that runs pluggable `OrchestrationPolicy
 
 ### Known issues after the 0.19 sync
 
-- `packages/agent-core/test/agent/compaction/full.test.ts > "keeps messages appended while compacting an unchanged prefix"` — timeout. The WIP retry path inside `runOnce` fires `triggerPostCompactHook` and `injectGoal` in an order the snapshot doesn't expect.
-- `packages/agent-core/test/agent/compaction/full.test.ts > "continues a manual compaction run when the first pass still exceeds the trigger"` — timeout. Same root cause as above.
-- 8542 of 8546 non-skipped tests pass on `0.19.0-fork-merge`. The 4 failures are pre-existing in the WIP branch and need a deeper look at the retry-loop order of side-effects inside `compaction/full.ts`.
+_None — all 8560 tests pass._
+
+---
+
+### Resolved after the 0.19 sync
+
+The following issues were initially logged as known issues and have been fixed in subsequent commits on this branch:
+
+- **`packages/agent-core/test/agent/compaction/full.test.ts > "keeps messages appended while compacting an unchanged prefix"`** — was timing out because the fork's WIP `runOnce` cancelled on any history length change, but the test appends a message mid-compaction. Resolution: distinguish destructive changes (length shrank, prefix mutated) from safe appends (length grew, prefix untouched). The cancellation now only fires on destructive changes, which matches upstream's contract.
+- **`packages/agent-core/test/agent/compaction/full.test.ts > "continues a manual compaction run when the first pass still exceeds the trigger"`** — same root cause as above.
+- **`SkillRouter` over-firing** — the flag defaulted to `true` and the scoring function required only one shared token, so skills would fire on prompts like `run lint` (matched every skill with "run" in its corpus) or `thanks` (matched anything mentioning `help`). Resolution: switch default to opt-in (`KIMI_CODE_EXPERIMENTAL_SKILL_ROUTING=1`), require at least two distinct shared tokens and a six-token minimum message length.
 
 ---
 
