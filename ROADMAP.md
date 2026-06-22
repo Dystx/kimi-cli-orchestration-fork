@@ -42,6 +42,15 @@ The agent core gained an `Orchestrator` that runs pluggable `OrchestrationPolicy
 |------|--------|
 | Continuous plan tracker (P0) | **DONE** — re-architected as `PlanTrackingPolicy` |
 | Persistent cross-session memory (P2) | **DONE** — `MemoryStore` + `MemoryPolicy` |
+| **Sync to upstream v0.19 (Phase 13)** | **DONE** — `0.19.0-fork-merge` branch. Resolved 30 conflict files / 48 markers, kept all fork-specific features (orchestrator, swarm subagent plumbing, MiniMax-M3 think-tag strip, ACP adapter telemetry, `skill_routing` enabled by default). |
+
+---
+
+### Known issues after the 0.19 sync
+
+- `packages/agent-core/test/agent/compaction/full.test.ts > "keeps messages appended while compacting an unchanged prefix"` — timeout. The WIP retry path inside `runOnce` fires `triggerPostCompactHook` and `injectGoal` in an order the snapshot doesn't expect.
+- `packages/agent-core/test/agent/compaction/full.test.ts > "continues a manual compaction run when the first pass still exceeds the trigger"` — timeout. Same root cause as above.
+- 8542 of 8546 non-skipped tests pass on `0.19.0-fork-merge`. The 4 failures are pre-existing in the WIP branch and need a deeper look at the retry-loop order of side-effects inside `compaction/full.ts`.
 
 ---
 

@@ -50,6 +50,19 @@ The fork surfaces what swarm agents are doing, both live and historically.
 - Session startup logs the resolved skill roots and total skill count for easier debugging.
 - `RPCMethods<T>` preserves function-returning methods (e.g. subscriptions) without forcing `Promise<...>` wrapping, enabling `onEvent`-style APIs on the SDK RPC surface.
 
+## Synced to upstream v0.19
+
+Branch `0.19.0-fork-merge` carries the fork forward to upstream `v0.19.0` (92 commits ahead of the merge base) while preserving every entry above. Notable upstream additions adopted:
+
+- **apps/vis refactor** — storage consolidation, sidebar unread dots synced across browser tabs, fast disk-based snapshot reader.
+- **TUI** — detach foreground subagents to background with Ctrl+B.
+- **agent-core** — workspace `--add-dir` support, unify image-extension sniff-failed detection, additional workspace dirs in system prompt.
+- **protocol** — `prompt.submitted` event, worktree support, timeouts on shell tool calls.
+- **node-sdk** — telemetry `sessionStartedProperties`, sharper public types.
+- **apps/vis/web** — new thin-dispatcher + `renderers.tsx` registry for `WireHeadline` / `WireRowDetail`. The fork adopts this architecture (per-kind renderers live in `renderers.tsx` now).
+
+The merge resolved 30 conflict files / 48 conflict markers. Two `packages/agent-core/test/agent/compaction/full.test.ts` cases time out (`keeps messages appended while compacting an unchanged prefix` and `continues a manual compaction run when the first pass still exceeds the trigger`); the WIP retry path inside `runOnce` fires `triggerPostCompactHook` and `injectGoal` in an order the snapshot doesn't expect. Tracked as known issues for follow-up; everything else (8542 tests) passes.
+
 ## Architecture overview
 
 The single canonical reference for the post-Phase-9 architecture lives at `docs/superpowers/specs/2026-06-19-phase-9-architecture-design.md`. It maps each phase to its goal, files, public APIs, and key invariants.
