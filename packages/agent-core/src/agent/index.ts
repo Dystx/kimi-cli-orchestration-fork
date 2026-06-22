@@ -20,7 +20,7 @@ import type { SessionCostTracker } from '../session/cost-tracker';
 import type { SubagentResultCache } from '../session/subagent-cache';
 import type { SessionMessageBus } from '../session/message-bus';
 import type { SessionSharedStore } from '../session/shared-store';
-import type { SkillRegistry } from '../skill';import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
+import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
 import type { PromisableMethods } from '../utils/types';
 import { BackgroundManager, BackgroundTaskPersistence } from './background';
 import {
@@ -350,7 +350,7 @@ export class Agent {
       await this.background.loadFromDisk();
       await this.background.reconcile();
       await this.cron?.loadFromDisk();
-      await this.orchestrationHooks.load();
+      await this.orchestrationHooks?.load();
       await this.planTracker.load();
       this.context.finishResume();
       this.turn.finishResume();
@@ -358,7 +358,6 @@ export class Agent {
       this.replayBuilder.postRestoring = false;
     }
     return result;
-  }    return result;
   }
 
   get rpcMethods(): PromisableMethods<AgentAPI> {

@@ -31,6 +31,7 @@ import {
   type SubagentHandle,
 } from '../../../session/subagent-host';
 import { isUserCancellation } from '../../../utils/abort';
+import { createDeadlineAbortSignal } from '../../../utils/abort';
 import { AgentBackgroundTask, type BackgroundManager } from '../../../agent/background';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { matchesGlobRuleSubject } from '../../support/rule-match';
@@ -248,6 +249,8 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         };
       }
 
+      let foregroundDeadline: ReturnType<typeof createDeadlineAbortSignal> | undefined;
+
       if (runInBackground && !this.allowBackground) {
         return {
           output: BACKGROUND_AGENT_UNAVAILABLE,
@@ -439,7 +442,6 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
             try {
               handle = await this.subagentHost.spawn({
                 profileName: requestedProfileName ?? 'coder',
-                ...options,
                 parentToolCallId: toolCallId,
               });
             } catch (spawnError) {
@@ -487,7 +489,6 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
             try {
               handle = await this.subagentHost.spawn({
                 profileName: fallbackProfile,
-                ...options,
                 parentToolCallId: toolCallId,
               });
               attempt = 0; // reset retries for the fallback

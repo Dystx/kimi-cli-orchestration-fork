@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 
@@ -405,47 +405,40 @@ describe('FullCompaction', () => {
         { cwd: dir, sessionId: 'session-hooks' },
       ),
     });
-    try {
-      ctx.configure({
-        provider: CATALOGUED_PROVIDER,
-        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
-      });
-      ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
-      ctx.appendExchange(2, 'old user two', 'old assistant two', 40);
-      ctx.appendExchange(3, 'recent user three', 'recent assistant three', 120);
-      const compacted = ctx.once('context.apply_compaction');
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    ctx.appendExchange(2, 'old user two', 'old assistant two', 40);
+    ctx.appendExchange(3, 'recent user three', 'recent assistant three', 120);
+    const compacted = ctx.once('context.apply_compaction');
 
-      ctx.mockNextResponse({ type: 'text', text: 'Compacted summary.' });
-      ctx.agent.fullCompaction.begin({ source: 'auto', instruction: undefined });
-      await compacted;
-      await vi.waitFor(
-        () => {
-          expect(readHookPayloads(hookLog).map((payload) => payload['hook_event_name'])).toEqual([
-            'PreCompact',
-            'PostCompact',
-          ]);
-        },
-        { timeout: 5000 },
-      );
+    ctx.mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    ctx.agent.fullCompaction.begin({ source: 'auto', instruction: undefined });
+    await compacted;
+    await vi.waitFor(() => {
+      expect(readHookPayloads(hookLog).map((payload) => payload['hook_event_name'])).toEqual([
+        'PreCompact',
+        'PostCompact',
+      ]);
+    });
 
-      const [pre, post] = readHookPayloads(hookLog);
-      expect(pre).toMatchObject({
-        hook_event_name: 'PreCompact',
-        session_id: 'session-hooks',
-        cwd: dir,
-        trigger: 'auto',
-        token_count: 39,
-      });
-      expect(post).toMatchObject({
-        hook_event_name: 'PostCompact',
-        session_id: 'session-hooks',
-        cwd: dir,
-        trigger: 'auto',
-        estimated_token_count: ctx.agent.context.tokenCount,
-      });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const [pre, post] = readHookPayloads(hookLog);
+    expect(pre).toMatchObject({
+      hook_event_name: 'PreCompact',
+      session_id: 'session-hooks',
+      cwd: dir,
+      trigger: 'auto',
+      token_count: 39,
+    });
+    expect(post).toMatchObject({
+      hook_event_name: 'PostCompact',
+      session_id: 'session-hooks',
+      cwd: dir,
+      trigger: 'auto',
+      estimated_token_count: ctx.agent.context.tokenCount,
+    });
   });
 
   it('cancels while waiting for a PreCompact hook', async () => {
@@ -965,7 +958,7 @@ describe('FullCompaction', () => {
     await ctx.expectResumeMatches();
   });
 
-  it('cancels when messages are appended while compacting', async () => {
+  it('keeps messages appended while compacting an unchanged prefix', async () => {
     const ctx = testAgent();
     ctx.configure({
       provider: CATALOGUED_PROVIDER,
@@ -973,27 +966,12 @@ describe('FullCompaction', () => {
     });
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
-    const canceled = ctx.once('full_compaction.cancel');
     const compacted = ctx.once('context.apply_compaction');
     const completed = ctx.once('compaction.completed');
+
     ctx.mockNextResponse({ type: 'text', text: 'Compacted prefix.' });
     await ctx.rpc.beginCompaction({});
     ctx.agent.context.appendUserMessage([{ type: 'text', text: 'new user while compacting' }]);
-    await canceled;
-    await compacted;
-    await completed;
-
-    expect(ctx.newEvents()).toMatchInlineSnapshot(`
-      [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "old user one" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "recent user two" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] full_compaction.begin    { "source": "manual", "time": "<time>" }
-      [emit] compaction.started       { "trigger": "manual" }
-      [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "new user while compacting" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] usage.record             { "model": "kimi-code", "usage": { "inputOther": 473, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated     { "model": "kimi-code", "contextTokens": 80, "maxContextTokens": 256000, "contextUsage": 0.0003125, "planMode": false, "swarmMode": false, "permission": "manual", "usage": { "byModel": { "kimi-code": { "inputOther": 473, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 473, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
-      [wire] full_compaction.cancel   { "time": "<time>" }
-      [emit] compaction.cancelled     {}
-=======
     await compacted;
     await completed;
 
@@ -1009,7 +987,6 @@ describe('FullCompaction', () => {
       [emit] agent.status.updated       { "model": "kimi-code", "contextTokens": 5, "maxContextTokens": 256000, "contextUsage": 0.00001953125, "planMode": false, "swarmMode": false, "permission": "manual", "usage": { "byModel": { "kimi-code": { "inputOther": 499, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 499, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete   { "time": "<time>" }
       [emit] compaction.completed       { "result": { "summary": "Compacted prefix.", "compactedCount": 4, "tokensBefore": 25, "tokensAfter": 5 } }
->>>>>>> upstream/main
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
@@ -1024,20 +1001,8 @@ describe('FullCompaction', () => {
     expect(ctx.compactHistory()).toMatchInlineSnapshot(`
       [
         {
-          "role": "user",
-          "text": "old user one",
-        },
-        {
           "role": "assistant",
-          "text": "old assistant one",
-        },
-        {
-          "role": "user",
-          "text": "recent user two",
-        },
-        {
-          "role": "assistant",
-          "text": "recent assistant two",
+          "text": "Compacted prefix.",
         },
         {
           "role": "user",

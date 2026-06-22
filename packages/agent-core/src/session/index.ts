@@ -792,7 +792,7 @@ export class Session {
       log: this.log.createChild({ agentId: id }),
       pluginSessionStarts: type === 'main' ? this.options.pluginSessionStarts : undefined,
       appVersion: this.options.appVersion,
-      additionalDirs: this.additionalDirs,
+      additionalDirs: parentAgent?.getAdditionalDirs() ?? this.additionalDirs,
       orchestration: {
         messageBus: this.messageBus,
         sharedStore: this.sharedStore,
@@ -843,8 +843,8 @@ export class Session {
           this.log.warn(budgetAlert.message);
         }
         this.scheduleEmitStatus();
-      },      experimentalFlags: this.experimentalFlags,
-      additionalDirs: parentAgent?.getAdditionalDirs() ?? this.additionalDirs,
+      },
+      experimentalFlags: this.experimentalFlags,
     });
   }
 

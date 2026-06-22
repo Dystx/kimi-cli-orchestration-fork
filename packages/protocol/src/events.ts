@@ -709,7 +709,7 @@ export type AgentEvent =
   | BackgroundTaskStartedEvent
   | BackgroundTaskTerminatedEvent
   | CronFiredEvent
-  | SwarmRunSnapshotEvent;
+  | SwarmRunSnapshotEvent
   | PromptSubmittedEvent;
 export type Event = AgentEvent & { agentId: string; sessionId: string };
 

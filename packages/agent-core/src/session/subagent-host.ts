@@ -193,7 +193,10 @@ export class SessionSubagentHost {
         // (`subagent-host-tool-events.test.ts`).
         const entry = this.activeChildren.get(id);
         if (entry !== undefined && this.session.orchestrationHooks !== undefined) {
-          entry.unsubscribeToolEventBridge = this.attachChildToolEventBridge(
+          // fork: subscribe to child tool events for orchestrationHooks; the unsubscribe handle
+          // is intentionally not retained here because upstream's ActiveChild shape doesn't
+          // carry a field for it — restoration to full fork behavior lives in a follow-up.
+          this.attachChildToolEventBridge(
             id,
             agent.rpc,
             this.session.orchestrationHooks,
