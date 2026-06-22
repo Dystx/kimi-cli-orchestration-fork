@@ -370,9 +370,39 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       let attempt = 0;
       let fallbackAttempted = false;
 
+      // Race the subagent's completion against the foreground release. If
+      // the user detaches the foreground task via Ctrl+B, the manager
+      // releases with `detached` and we exit cleanly instead of waiting
+      // forever on an uncompletable promise.
+      let released: 'detached' | 'terminal' | undefined = undefined;
+      const releasePromise: Promise<'detached' | 'terminal' | undefined> = this.backgroundManager
+        .waitForForegroundRelease(taskId)
+        .then((reason) => {
+          released = reason;
+          return reason;
+        });
+      const completionPromise: Promise<{ result: string; usage?: unknown; changes?: string }> =
+        handle.completion.then((result) => {
+          released = 'terminal';
+          return result as { result: string; usage?: unknown; changes?: string };
+        });
+
       while (true) {
+        // Bail out if the user detached the foreground task before
+        // completion — the manager will resolve `released` with
+        // `detached` and we want to surface the background-shaped
+        // output instead of pretending the subagent finished.
+        if (released === 'detached') break;
         try {
-          const result = await handle.completion;
+          // Race the completion against the foreground release promise.
+          // `Promise.race` resolves with whichever finishes first; the
+          // loser is intentionally left dangling (its consumer is gone).
+          const result = await Promise.race([completionPromise, releasePromise.then(() => null)]);
+
+          // If the foreground was released (detached), `result` will be
+          // null and we should break out of the loop. The release path
+          // below will format the output.
+          if (result === null || released === 'detached') break;
 
           // Store in cache if caching is enabled
           if (args.use_cache === true && cache !== undefined && resumeAgentId === undefined) {
@@ -382,7 +412,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
               args.prompt,
               {
                 result: result.result,
-                usage: result.usage,
+                usage: result.usage as import('@moonshot-ai/kosong').TokenUsage | undefined,
                 changes: result.changes,
                 cachedAt: Date.now(),
                 ttlMs: cacheTtl,
@@ -547,8 +577,11 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
           return { output: lines.join('\n'), isError: true };
         }
       }
-
-      const release = await this.backgroundManager.waitForForegroundRelease(taskId);
+      // Unreachable: kept for the compiler while the retry loop is being
+      // reshaped. The real exit happens at the top of the try block above
+      // via the `if (released === 'detached') break;` guard.
+      // eslint-disable-next-line no-unreachable
+      const release: 'detached' | 'terminal' | undefined = released ?? await releasePromise;
       if (release === 'detached') {
         return {
           output: formatBackgroundAgentResult(
