@@ -289,6 +289,8 @@ export class FooterComponent implements Component {
   private gitCache: GitStatusCache;
   private gitCacheWorkDir: string;
   private transientHint: string | null = null;
+  private backgroundBashTaskCount = 0;
+  private backgroundAgentCount = 0;
   private goalSnapshotKey: string | null = null;
   private goalObservedAtMs = Date.now();
   private goalTimer: ReturnType<typeof setInterval> | null = null;

@@ -297,10 +297,14 @@ export function projectContext(
         // byScope keeps per-scope cumulative spend. This is NOT the live context-window
         // fill — that is `contextTokens` (latest step.end.usage). The web TokenBar shows
         // contextTokens; byScope/byModel are for the cumulative breakdown only.
+        // upstream 0.19 made `usage` optional on WireRecord; skip if absent.
+        const stepUsage = rec.usage;
+        if (!stepUsage) break;
+        const modelBucket = usage.byModel[rec.model] ?? { ...ZERO };
         const scope = (rec.usageScope ?? 'session') as 'session' | 'turn';
-        addUsage(usage.byScope[scope], rec.usage);
-        usage.byModel[rec.model] ??= { ...ZERO };
-        addUsage(usage.byModel[rec.model], rec.usage);
+        addUsage(usage.byScope[scope], stepUsage);
+        addUsage(modelBucket, stepUsage);
+        usage.byModel[rec.model] = modelBucket;
         break;
       }
       case 'config.update': {

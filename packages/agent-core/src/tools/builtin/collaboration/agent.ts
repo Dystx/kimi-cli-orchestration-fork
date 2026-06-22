@@ -443,6 +443,14 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
               handle = await this.subagentHost.spawn({
                 profileName: requestedProfileName ?? 'coder',
                 parentToolCallId: toolCallId,
+                prompt: args.prompt,
+                description: args.description,
+                runInBackground,
+                worktree: args.worktree === true,
+                signal: backgroundController?.signal ?? foregroundDeadline?.signal ?? signal,
+                tokenBudget: args.token_budget,
+                timeBudgetMs: args.time_budget_ms,
+                streamUpdates: args.stream_updates,
               });
             } catch (spawnError) {
               this.log?.warn('subagent retry spawn failed', {
@@ -490,6 +498,14 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
               handle = await this.subagentHost.spawn({
                 profileName: fallbackProfile,
                 parentToolCallId: toolCallId,
+                prompt: args.prompt,
+                description: args.description,
+                runInBackground,
+                worktree: args.worktree === true,
+                signal: backgroundController?.signal ?? foregroundDeadline?.signal ?? signal,
+                tokenBudget: args.token_budget,
+                timeBudgetMs: args.time_budget_ms,
+                streamUpdates: args.stream_updates,
               });
               attempt = 0; // reset retries for the fallback
               continue;

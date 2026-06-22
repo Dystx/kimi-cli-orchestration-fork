@@ -320,6 +320,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({
@@ -359,6 +360,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({
@@ -394,6 +396,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({
@@ -436,6 +439,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({
@@ -479,6 +483,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({
@@ -516,6 +521,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({
@@ -547,6 +553,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({
@@ -577,6 +584,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({
@@ -630,6 +638,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({
@@ -675,6 +684,7 @@ max_context_size = 100000
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({

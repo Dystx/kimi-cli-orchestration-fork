@@ -103,7 +103,11 @@ type SubagentCompletion = {
 
 type ActiveChild = {
   readonly controller: AbortController;
-  readonly runInBackground: boolean;
+  // `runInBackground` is mutable because `markActiveChildDetached` flips
+  // a foreground child to "background" after the user detaches it via Ctrl+B.
+  // The previous shape (readonly) came from a stale upstream interface and
+  // would force a re-create of the entry, which leaks the unsubscribe handle.
+  runInBackground: boolean;
   /**
    * Handle returned by `attachChildToolEventBridge` for the child's tool
    * event subscription. Lifecycle handlers invoke this in the `finally`
@@ -128,13 +132,7 @@ export type SubagentHandle = {
 };
 
 export class SessionSubagentHost {
-  private readonly activeChildren = new Map<
-    string,
-    {
-      readonly controller: AbortController;
-      runInBackground: boolean;
-    }
-  >();
+  private readonly activeChildren = new Map<string, ActiveChild>();
   private readonly subagentStatuses = new Map<string, SubagentStatus>();
   constructor(
     private readonly session: Session,

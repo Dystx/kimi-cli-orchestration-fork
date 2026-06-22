@@ -2,6 +2,11 @@ import type { Component, Focusable } from '@earendil-works/pi-tui';
 import type {
   AgentStatusUpdatedEvent,
   AssistantDeltaEvent,
+  BackgroundTaskStartedEvent,
+  BackgroundTaskTerminatedEvent,
+  BackgroundTaskInfo,
+  CompactionCancelledEvent,
+  CompactionCompletedEvent,
   CronFiredEvent,
   ErrorEvent,
   Event,
@@ -21,6 +26,7 @@ import type {
   TurnStepStartedEvent,
   WarningEvent,
 } from '@moonshot-ai/kimi-code-sdk';
+import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
 
 import { MoonLoader } from '../components/chrome/moon-loader';
 import {

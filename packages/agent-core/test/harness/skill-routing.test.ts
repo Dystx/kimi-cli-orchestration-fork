@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { testAgent } from '../agent/harness/agent';
 import { SkillManager } from '../../src/agent/skill';
 import { FLAG_DEFINITIONS, FlagResolver } from '../../src/flags';
-import { SkillRegistry } from '../../src/skill';
+import { SessionSkillRegistry, type SkillRegistry } from '../../src/skill';
 
 describe('SkillRoutingPolicy integration', () => {
   let dir: string;
@@ -48,7 +48,7 @@ describe('SkillRoutingPolicy integration', () => {
     ctx.configure();
     ctx.mockNextResponse({ type: 'text', text: 'done' });
 
-    const registry = new SkillRegistry();
+    const registry = new SessionSkillRegistry();
     await registry.loadRoots([{ path: skillDir, source: 'project' }]);
     (ctx.agent as unknown as { skills: SkillManager | null }).skills = new SkillManager(
       ctx.agent,

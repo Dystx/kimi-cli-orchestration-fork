@@ -15,7 +15,7 @@
  * NOT here. The peer-service interfaces stay SDK-shaped.
  */
 
-import type { ApprovalRequest, ApprovalResponse, Event, QuestionRequest, QuestionResult, SDKAPI, ToolCallRequest, ToolCallResponse } from '../../rpc';
+import type { ApprovalRequest, ApprovalResponse, AgentEvent, Event, QuestionRequest, QuestionResult, SDKAPI, ToolCallRequest, ToolCallResponse } from '../../rpc';
 
 import type { IApprovalService } from '../approval/approval';
 import type { IEventService } from '../event/event';
@@ -36,29 +36,29 @@ export class BridgeClientAPI implements SDKAPI {
     this.deps = deps;
   }
 
-  emitEvent(event: Event): void {
+  emitEvent(event: AgentEvent & { readonly sessionId: string; readonly agentId: string }): void {
     const e = event as { type?: string; sessionId?: string; agentId?: string };
     this.deps.logService.debug(
       { type: e.type, sessionId: e.sessionId, agentId: e.agentId },
       '[DBG coreProcessClient.emitEvent]',
     );
-    this.deps.eventService.publish(event);
+    this.deps.eventService.publish(event as Event);
   }
 
   async requestApproval(
-    request: ApprovalRequest & { sessionId: string; agentId: string },
+    request: ApprovalRequest & { readonly sessionId: string; readonly agentId: string },
   ): Promise<ApprovalResponse> {
     return this.deps.approvalService.request(request);
   }
 
   async requestQuestion(
-    request: QuestionRequest & { sessionId: string; agentId: string },
+    request: QuestionRequest & { readonly sessionId: string; readonly agentId: string },
   ): Promise<QuestionResult> {
     return this.deps.questionService.request(request);
   }
 
   async toolCall(
-    request: ToolCallRequest & { sessionId: string; agentId: string },
+    request: ToolCallRequest & { readonly sessionId: string; readonly agentId: string },
   ): Promise<ToolCallResponse> {
     // Mirrors `SDKRpcClientBase.toolCall` (packages/node-sdk/src/rpc.ts:577-582)
     // — the daemon's in-process adapter does not expose SDK-side custom tool
@@ -66,6 +66,18 @@ export class BridgeClientAPI implements SDKAPI {
     return {
       output: `SDK custom tool calls are not supported in the daemon adapter: ${request.toolCallId}`,
       isError: true,
+    };
+  }
+
+  /**
+   * Required by the SDKAPI contract but unused in the in-process bridge.
+   * Subscriptions are wired at the core level via `proxyWithExtraPayload`
+   * and the orchestration layer's own event bus; this stub exists only to
+   * satisfy the interface so the class compiles.
+   */
+  onEvent(_listener: (event: AgentEvent) => void): () => void {
+    return () => {
+      // no-op
     };
   }
 }

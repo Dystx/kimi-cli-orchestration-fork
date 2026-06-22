@@ -8,6 +8,7 @@ function makeRegistry(skills: SkillDefinition[]): SkillRegistry {
   return {
     getSkill: (name: string) => skills.find((s) => s.name === name ),
     listSkills: () => skills,
+    listInvocableSkills: () => skills,
     renderSkillPrompt: (skill: SkillDefinition, _args: string) =>
       skill.name === 'missing' ? '' : `PROMPT:${skill.name}`,
   } as unknown as SkillRegistry;
@@ -311,6 +312,10 @@ describe('OrchestrationHooks', () => {
       const bigPrompt = 'x'.repeat(5000);
       const registry = {
         listSkills: () => [
+          { name: 'skill-a', description: 'aaa', path: '/a', dir: '/a', content: bigPrompt, metadata: {}, source: 'builtin' },
+          { name: 'skill-b', description: 'bbb', path: '/b', dir: '/b', content: bigPrompt, metadata: {}, source: 'builtin' },
+        ],
+        listInvocableSkills: () => [
           { name: 'skill-a', description: 'aaa', path: '/a', dir: '/a', content: bigPrompt, metadata: {}, source: 'builtin' },
           { name: 'skill-b', description: 'bbb', path: '/b', dir: '/b', content: bigPrompt, metadata: {}, source: 'builtin' },
         ],

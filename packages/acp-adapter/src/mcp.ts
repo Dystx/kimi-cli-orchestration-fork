@@ -98,17 +98,7 @@ function acpMcpServerToConfig(
       });
       return null;
     }
-  }  }
-
-  // Defensive: future ACP transports land here too. The cast is the
-  // narrowest way to read `name`/`type` off the leftover variant
-  // without re-declaring the union.
-  const fallback = server as { name?: string; type?: string };
-  log.warn('acp: dropping unsupported MCP server transport', {
-    name: fallback.name,
-    type: fallback.type,
-  });
-  return null;
+  }
 }
 
 function headersArrayToRecord(

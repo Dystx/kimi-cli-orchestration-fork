@@ -228,8 +228,8 @@ export class FullCompaction {
       }
       this.markCompleted();
       this.agent.emitEvent({ type: 'compaction.completed', result: finalResult });
-      await this.agent.injection.injectGoal();
-      this.triggerPostCompactHook(data, finalResult);
+      // Per-pass `triggerPostCompactHook` calls live inside the loop below
+      // (see `runOnce`); the worker here just emits the completion event.
     } catch (error) {
       if (isAbortError(error)) return;
       const blockedByTurn = this.compacting?.blockedByTurn === true;

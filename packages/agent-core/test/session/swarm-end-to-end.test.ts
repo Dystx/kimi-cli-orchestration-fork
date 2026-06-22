@@ -167,7 +167,7 @@ describe('swarm pipeline end-to-end', () => {
     const { SubagentHost } = await import('../../src/session/subagent-host');
 
     const { session } = makeSession();
-    const host = new SubagentHost({} as never);
+    const host = new SubagentHost(session, 'parent');
 
     // Mock child rpc with onEvent + emit helpers.
     const childSubscribers: Array<(e: unknown) => void> = [];
@@ -205,21 +205,19 @@ describe('swarm pipeline end-to-end', () => {
     );
     coordinator.registerMember('alice', { description: 'alice' } as unknown as AgentSwarmSpec);
 
-    fireEventViaBridge: {
-      // Tell the coordinator about the child.
-      session.orchestrationHooks.emit({
-        type: 'subagent.spawned',
-        payload: { subagentId: 'sub-2' },
-      } as never);
+    // Tell the coordinator about the child.
+    session.orchestrationHooks.emit({
+      type: 'subagent.spawned',
+      payload: { subagentId: 'sub-2' },
+    } as never);
 
-      // Now fire a tool event through the child rpc; the bridge re-emits
-      // through orchestrationHooks stamped with subagentId='sub-2'.
-      (childRpc.emit as ReturnType<typeof vi.fn>)({
-        type: 'tool.call.started',
-        toolName: 'shell',
-        args: { command: 'ls' },
-      });
-    }
+    // Now fire a tool event through the child rpc; the bridge re-emits
+    // through orchestrationHooks stamped with subagentId='sub-2'.
+    childRpc.emit({
+      type: 'tool.call.started',
+      toolName: 'shell',
+      args: { command: 'ls' },
+    });
 
     const last = received.at(-1);
     const alice = last?.members.find((m) => m.memberId === 'alice');

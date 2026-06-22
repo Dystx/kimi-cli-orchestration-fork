@@ -137,7 +137,26 @@ describe('Keyword matcher', () => {
         ],
         hasSkill: () => true,
         renderSkillPrompt: (skill: SkillDefinition) => skill.content ?? '',
-        listInvocableSkills: () => [],
+        listInvocableSkills: () => [
+          {
+            name: 'quality-gate',
+            description: 'Run lint typecheck and tests before finishing',
+            path: '/test',
+            dir: '/test',
+            content: 'test',
+            metadata: {},
+            source: 'builtin',
+          } as SkillDefinition,
+          {
+            name: 'code-review',
+            description: 'Review code changes for correctness',
+            path: '/test',
+            dir: '/test',
+            content: 'test',
+            metadata: {},
+            source: 'builtin',
+          } as SkillDefinition,
+        ],
       } as unknown as SkillRegistry;
 
       const results = recommendSkillsForWork('run lint and tests on my code', mockRegistry);
@@ -161,7 +180,17 @@ describe('Keyword matcher', () => {
         ],
         hasSkill: () => true,
         renderSkillPrompt: (skill: SkillDefinition) => skill.content ?? '',
-        listInvocableSkills: () => [],
+        listInvocableSkills: () => [
+          {
+            name: 'accessibility-audit',
+            description: 'Check accessibility',
+            path: '/test',
+            dir: '/test',
+            content: 'test',
+            metadata: { tags: ['a11y', 'wcag', 'aria'] },
+            source: 'builtin',
+          } as SkillDefinition,
+        ],
       } as unknown as SkillRegistry;
 
       const results = recommendSkillsForWork('check wcag compliance', mockRegistry);
@@ -185,7 +214,17 @@ describe('Keyword matcher', () => {
         ],
         hasSkill: () => true,
         renderSkillPrompt: (skill: SkillDefinition) => skill.content ?? '',
-        listInvocableSkills: () => [],
+        listInvocableSkills: () => [
+          {
+            name: 'xyz-foobar',
+            description: 'Something about quantum physics',
+            path: '/test',
+            dir: '/test',
+            content: 'test',
+            metadata: {},
+            source: 'builtin',
+          } as SkillDefinition,
+        ],
       } as unknown as SkillRegistry;
 
       const results = recommendSkillsForWork('basketball championship finals', mockRegistry);

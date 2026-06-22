@@ -148,7 +148,7 @@ export function recommendSkillsForWork(
 ): Array<{ skill: SkillDefinition; score: number }> {
   const textKeywords = extractKeywords(workDescription);
   const textSet = new Set(textKeywords);
-  const allSkills = registry.listSkills();
+  const allSkills = registry.listInvocableSkills();
   const results: Array<{ skill: SkillDefinition; score: number }> = [];
 
   for (const skill of allSkills) {
