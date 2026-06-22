@@ -21,6 +21,8 @@ import {
   isFunctionToolCall,
   normalizeOpenAIFinishReason,
   type OpenAIContentPart,
+  splitThinkTags,
+  ThinkTagSplitter,
   TOOL_RESULT_MEDIA_PLACEHOLDER,
   TOOL_RESULT_MEDIA_PROMPT,
   type ToolMessageConversion,
@@ -364,7 +366,19 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
     }
 
     if (message.content) {
-      yield { type: 'text', text: message.content } satisfies StreamedMessagePart;
+      // Some OpenAI-compatible providers (e.g. MiniMax-M3) ship reasoning
+      // inline inside `content` as `<think>...</think>` blocks rather than a
+      // separate `reasoning_content` field. Split those tags out so the
+      // harness sees reasoning as a discrete `ThinkPart` instead of leaking
+      // the literal `<think>` text into the visible reply.
+      for (const seg of splitThinkTags(message.content)) {
+        if (seg.think !== null && seg.think.length > 0) {
+          yield { type: 'think', think: seg.think } satisfies StreamedMessagePart;
+        }
+        if (seg.text !== null && seg.text.length > 0) {
+          yield { type: 'text', text: seg.text } satisfies StreamedMessagePart;
+        }
+      }
     }
 
     if (message.tool_calls) {
@@ -385,6 +399,12 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
     reasoningKey: string | undefined,
   ): AsyncGenerator<StreamedMessagePart> {
     const bufferedToolCalls = new Map<number | string, BufferedChatCompletionToolCall>();
+    // Streaming splitter for inline `<think>...</think>` tags inside
+    // `delta.content`. Some OpenAI-compatible providers (e.g. MiniMax-M3)
+    // route reasoning through these tags rather than a separate
+    // `reasoning_content` field. The splitter carries state across chunks
+    // so a tag split between two SSE chunks is still recognised.
+    const thinkSplitter = new ThinkTagSplitter();
 
     try {
       for await (const chunk of response) {
@@ -418,9 +438,18 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
           yield { type: 'think', think: reasoning } satisfies StreamedMessagePart;
         }
 
-        // text content
-        if (delta.content) {
-          yield { type: 'text', text: delta.content } satisfies StreamedMessagePart;
+        // text content — split inline `<think>` tags so reasoning is yielded
+        // as a discrete `ThinkPart` instead of leaking the literal `<think>`
+        // text into the visible reply.
+        if (typeof delta.content === 'string' && delta.content.length > 0) {
+          for (const seg of thinkSplitter.push(delta.content)) {
+            if (seg.think !== null && seg.think.length > 0) {
+              yield { type: 'think', think: seg.think } satisfies StreamedMessagePart;
+            }
+            if (seg.text !== null && seg.text.length > 0) {
+              yield { type: 'text', text: seg.text } satisfies StreamedMessagePart;
+            }
+          }
         }
 
         // tool calls — preserve `index` on every yielded part so the generate
@@ -429,6 +458,17 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
           for (const part of convertChatCompletionStreamToolCall(toolCall, bufferedToolCalls)) {
             yield part;
           }
+        }
+      }
+
+      // End of stream — flush any buffered content the splitter was holding
+      // back while waiting for a possibly-split `<think>` or `</think>` tag.
+      for (const seg of thinkSplitter.flush()) {
+        if (seg.think !== null && seg.think.length > 0) {
+          yield { type: 'think', think: seg.think } satisfies StreamedMessagePart;
+        }
+        if (seg.text !== null && seg.text.length > 0) {
+          yield { type: 'text', text: seg.text } satisfies StreamedMessagePart;
         }
       }
     } catch (error: unknown) {

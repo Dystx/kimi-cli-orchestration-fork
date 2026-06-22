@@ -90,13 +90,16 @@ describe('SkillRoutingPolicy', () => {
     expect(databaseCalls.length).toBe(1);
   });
 
-  it('re-evaluates after onContextCompacted', async () => {
+  it('re-activates after onContextCompacted drops skill content', async () => {
+    // Compaction can drop the previously activated skill content from the
+    // model context. The policy must re-activate so the model regains
+    // access without requiring a manual `/skill` invocation.
     const policy = new SkillRoutingPolicy(makeAgent({ flagEnabled: true, activate, skills, history }));
     await policy.beforeStep({ turnId: 1, signal: new AbortController().signal });
     policy.onContextCompacted();
     await policy.beforeStep({ turnId: 2, signal: new AbortController().signal });
     const databaseCalls = activate.mock.calls.filter((c) => c[0].name === 'database-helper');
-    expect(databaseCalls.length).toBe(1);
+    expect(databaseCalls.length).toBe(2);
   });
 
   it('clears the activated set on onContextClear', async () => {

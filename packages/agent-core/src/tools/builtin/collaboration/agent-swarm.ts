@@ -273,6 +273,20 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
       if (handle !== undefined && spec !== undefined) {
         coordinator?.registerMember(handle.agentId, spec, handle.agentId);
       }
+      // `handle.completion` rejects when the child turn fails (e.g. provider
+      // auth/rate-limit errors). The SwarmCoordinator already surfaces that
+      // failure via the `subagent.failed` event and `coordinator.awaitCompletion`
+      // below, so the completion promise itself is redundant for tool output —
+      // but it must not be allowed to escape as an unhandled rejection, which
+      // would terminate the CLI process. Mirror the pattern in the single
+      // `Agent` tool (agent.ts: `void handle.completion.catch(() => {})`) by
+      // attaching a no-op handler that logs the failure for diagnostics.
+      handle?.completion.catch((error: unknown) => {
+        this.session?.log.warn('AgentSwarm subagent completion rejected', {
+          subagentId: handle.agentId,
+          error,
+        });
+      });
     }
 
     // Wait for each spawned subagent to reach a terminal state via the
@@ -422,6 +436,25 @@ function childDescription(swarmDescription: string, index: number, profileName: 
   return `${swarmDescription} #${String(index)} (${profileName})`;
 }
 
+// Hard cap on per-member body size to keep the swarm result from dominating
+// the main agent's context. With 8+ subagents emitting long results, the
+// raw XML envelope can easily exceed compaction thresholds and force
+// `micro_compaction` to drop the system prompt — which then breaks skill
+// auto-activation for the rest of the session. 4000 chars is enough for
+// a meaningful summary while keeping the whole result under 32K for the
+// typical 8-member swarm.
+const MAX_SUBAGENT_BODY_CHARS = 4000;
+
+function truncateBody(body: string): { content: string; truncated: boolean } {
+  if (body.length <= MAX_SUBAGENT_BODY_CHARS) {
+    return { content: body, truncated: false };
+  }
+  return {
+    content: `${body.slice(0, MAX_SUBAGENT_BODY_CHARS)}\n... [truncated ${String(body.length - MAX_SUBAGENT_BODY_CHARS)} chars; the full body is available via resume_agent_ids]`,
+    truncated: true,
+  };
+}
+
 function renderSwarmResults(results: readonly SwarmRunResult[]): string {
   const completed = results.filter((result) => result.status === 'completed').length;
   const failed = results.filter((result) => result.status === 'failed').length;
@@ -445,11 +478,24 @@ function renderSwarmResults(results: readonly SwarmRunResult[]): string {
     const mode = result.spec.kind === 'resume' ? ' mode="resume"' : '';
     const item = result.spec.item === undefined ? '' : ` item="${escapeXmlAttribute(result.spec.item)}"`;
     const state = result.state === undefined ? '' : ` state="${result.state}"`;
-    const body = result.status === 'completed' ? (result.result ?? '') : (result.error ?? 'unknown error');
+    const rawBody = result.status === 'completed' ? (result.result ?? '') : (result.error ?? 'unknown error');
+    const { content: body, truncated } = truncateBody(rawBody);
+    const truncatedAttr = truncated ? ' truncated="true"' : '';
     lines.push(
-      `<subagent${mode}${agentId}${item}${state} outcome="${result.status}">${body}</subagent>`,
+      `<subagent${mode}${agentId}${item}${state}${truncatedAttr} outcome="${result.status}">${body}</subagent>`,
     );
   }
+
+  // Anchor: explicitly tell the model the swarm is over and it should now
+  // respond to the user. Without this, models — especially those that
+  // stream reasoning inline (e.g. MiniMax-M3) — keep "responding" to the
+  // subagent bodies as if they were the next user message. This is the
+  // post-tool reminder that SwarmMode.exit() intentionally skips for
+  // tool-triggered swarms to avoid leaking the manual-mode reminder
+  // variant; we compensate here at the tool-result layer.
+  lines.push(
+    '<post_swarm_reminder>The AgentSwarm run has finished. Synthesize the subagent results above and respond to the user. Do not call AgentSwarm again unless the user explicitly asks for more parallel subagents.</post_swarm_reminder>',
+  );
 
   lines.push('</agent_swarm_result>');
   return lines.join('\n');

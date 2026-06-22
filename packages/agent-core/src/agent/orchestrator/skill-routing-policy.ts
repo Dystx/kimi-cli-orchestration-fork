@@ -49,7 +49,13 @@ export class SkillRoutingPolicy implements OrchestrationPolicy {
   }
 
   onContextCompacted(): void {
+    // Compaction may have dropped the previously auto-activated skill
+    // content from context. Mark for re-evaluation AND clear the dedup
+    // set so the next `beforeStep` actually re-activates the same skills
+    // — otherwise the model loses access to a skill mid-session with no
+    // way to recover it without a manual `/skill` invocation.
     this.pendingReevaluate = true;
+    this.autoActivated.clear();
   }
 
   onContextClear(): void {

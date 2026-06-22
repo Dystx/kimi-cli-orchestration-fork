@@ -393,12 +393,28 @@ export class SwarmCoordinator {
       throw signal.reason ?? new Error('aborted');
     }
     return new Promise<SubagentResult | undefined>((resolve, reject) => {
-      this.pendingCompletions.set(agentId, { resolve, reject });
+      let onAbort: (() => void) | undefined;
+      const settle = () => {
+        if (signal !== undefined && onAbort !== undefined) {
+          signal.removeEventListener('abort', onAbort);
+        }
+      };
+      this.pendingCompletions.set(agentId, {
+        resolve: (result) => {
+          settle();
+          resolve(result);
+        },
+        reject: (error) => {
+          settle();
+          reject(error);
+        },
+      });
       if (signal !== undefined) {
-        const onAbort = () => {
+        onAbort = () => {
           const pending = this.pendingCompletions.get(agentId);
           if (pending !== undefined) {
             this.pendingCompletions.delete(agentId);
+            settle();
             pending.reject(signal.reason ?? new Error('aborted'));
           }
         };

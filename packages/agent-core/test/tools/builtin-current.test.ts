@@ -504,6 +504,7 @@ describe('current builtin collaboration tools', () => {
       '<summary>completed: 2</summary>',
       '<subagent agent_id="agent-explore-1" item="src/a.ts" outcome="completed">explore result a</subagent>',
       '<subagent agent_id="agent-explore-2" item="src/b.ts" outcome="completed">explore result b</subagent>',
+      '<post_swarm_reminder>The AgentSwarm run has finished. Synthesize the subagent results above and respond to the user. Do not call AgentSwarm again unless the user explicitly asks for more parallel subagents.</post_swarm_reminder>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
@@ -652,6 +653,7 @@ describe('current builtin collaboration tools', () => {
       '<agent_swarm_result>',
       '<summary>completed: 1</summary>',
       '<subagent agent_id="agent-new-3" item="src/new.ts" outcome="completed">result 3</subagent>',
+      '<post_swarm_reminder>The AgentSwarm run has finished. Synthesize the subagent results above and respond to the user. Do not call AgentSwarm again unless the user explicitly asks for more parallel subagents.</post_swarm_reminder>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
@@ -696,6 +698,7 @@ describe('current builtin collaboration tools', () => {
       '<summary>completed: 2</summary>',
       '<subagent agent_id="agent-new-a" item="src/new-a.ts" outcome="completed">result a</subagent>',
       '<subagent agent_id="agent-new-b" item="src/new-b.ts" outcome="completed">result b</subagent>',
+      '<post_swarm_reminder>The AgentSwarm run has finished. Synthesize the subagent results above and respond to the user. Do not call AgentSwarm again unless the user explicitly asks for more parallel subagents.</post_swarm_reminder>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
@@ -729,6 +732,7 @@ describe('current builtin collaboration tools', () => {
       '<resume_hint>Call AgentSwarm with resume_agent_ids using the agent_id values in this result to continue unfinished work.</resume_hint>',
       '<subagent agent_id="agent-coder-1" item="src/a.ts" outcome="completed">imports are stable</subagent>',
       '<subagent agent_id="agent-coder-2" item="src/b.ts" outcome="failed">Agent timed out after 30s.</subagent>',
+      '<post_swarm_reminder>The AgentSwarm run has finished. Synthesize the subagent results above and respond to the user. Do not call AgentSwarm again unless the user explicitly asks for more parallel subagents.</post_swarm_reminder>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(swarmMode.enter).toHaveBeenCalledWith('tool');
@@ -770,6 +774,7 @@ describe('current builtin collaboration tools', () => {
       '<resume_hint>Call AgentSwarm with resume_agent_ids using the agent_id values in this result to continue unfinished work.</resume_hint>',
       '<subagent agent_id="agent-failed-a" item="src/a.ts" outcome="failed">Agent did not start.</subagent>',
       '<subagent agent_id="agent-failed-b" item="src/b.ts" outcome="failed">Agent also did not start.</subagent>',
+      '<post_swarm_reminder>The AgentSwarm run has finished. Synthesize the subagent results above and respond to the user. Do not call AgentSwarm again unless the user explicitly asks for more parallel subagents.</post_swarm_reminder>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
@@ -814,6 +819,7 @@ describe('current builtin collaboration tools', () => {
       '<subagent agent_id="agent-coder-1" item="src/a.ts" outcome="completed">result a</subagent>',
       '<subagent agent_id="agent-coder-2" item="src/b.ts" outcome="completed">result b</subagent>',
       '<subagent agent_id="agent-coder-3" item="src/c.ts" outcome="completed">result c</subagent>',
+      '<post_swarm_reminder>The AgentSwarm run has finished. Synthesize the subagent results above and respond to the user. Do not call AgentSwarm again unless the user explicitly asks for more parallel subagents.</post_swarm_reminder>',
       '</agent_swarm_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();

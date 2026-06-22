@@ -305,15 +305,18 @@ describe('SessionSubagentHost', () => {
         }),
       }),
     );
+    // Subagent profile YAMLs no longer pin a modelAlias; subagents inherit
+    // the parent's model and thinking level so AgentSwarm/Agent picks up the
+    // user's configured provider instead of always forcing kimi-k2.6.
     expect(child.agent.config.data()).toMatchObject({
       cwd: parent.agent.config.cwd,
       profileName: 'explore',
-      modelAlias: 'kimi-k2.6',
+      modelAlias: parent.agent.config.modelAlias,
       thinkingLevel: parent.agent.config.thinkingLevel,
     });
     expect(child.agent.config.data().provider).toMatchObject({
-      type: 'kimi',
-      model: 'kimi-k2.6',
+      type: parent.agent.config.data().provider?.type,
+      model: parent.agent.config.modelAlias,
     });
     expect(child.agent.config.systemPrompt).toContain('codebase exploration specialist');
     expect(child.agent.permission.mode).toBe('yolo');

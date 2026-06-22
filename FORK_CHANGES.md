@@ -9,7 +9,7 @@ Each phase ships with a design spec (`docs/superpowers/specs/`) and implementati
 The fork introduces an event-driven orchestration layer on top of the upstream agent core.
 
 - **`Orchestrator` class** (`packages/agent-core/src/agent/orchestrator/`). Runs pluggable `OrchestrationPolicy` instances before each step; isolates per-policy errors via `try/catch`; surfaces per-policy diagnostics via `getDiagnostics()`.
-- **`SkillRouter`** — auto-scores and pre-injects relevant skills based on the user's prompt. Gated behind the `skill_routing` experimental flag.
+- **`SkillRouter`** — auto-scores and pre-injects relevant skills based on the user's prompt. Enabled by default; disable with `KIMI_CODE_EXPERIMENTAL_SKILL_ROUTING=0` if the activation is too eager for your workflow.
 - **`MemoryPolicy`** — auto-injects relevant notes from the memory store into prompts. Opt-in.
 - **`PlanTrackingPolicy`** — tracks plan progress across turns.
 - **`MemoryStore` interface + bundled MCP server** — `memory_read/write/search/delete` tools, auto-served when `SessionOptions.enableMemoryMcpServer = true`.

@@ -1,6 +1,5 @@
 extends: agent
 name: architect
-modelAlias: kimi-k2.6
 thinkingLevel: extended
 promptVars:
   roleAdditional: |

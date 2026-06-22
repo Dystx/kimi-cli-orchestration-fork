@@ -1,6 +1,5 @@
 extends: agent
 name: security
-modelAlias: kimi-k2.6
 thinkingLevel: extended
 promptVars:
   roleAdditional: |

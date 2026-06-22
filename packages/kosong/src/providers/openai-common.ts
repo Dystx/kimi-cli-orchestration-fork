@@ -293,6 +293,175 @@ export type ToolMessageConversion = 'extract_text' | null;
 export const TOOL_RESULT_MEDIA_PROMPT = 'Attached media from tool result:';
 export const TOOL_RESULT_MEDIA_PLACEHOLDER = '(see attached media)';
 
+/**
+ * Streaming-aware splitter for OpenAI-compatible responses that embed the
+ * model's chain-of-thought inline as `<think>...</think>` blocks within the
+ * regular `content` field, instead of routing it through a separate
+ * `reasoning_content` field.
+ *
+ * Some MiniMax-style providers serialize reasoning this way; the harness
+ * expects reasoning as a discrete {@link StreamedMessagePart} of type
+ * `'think'`, so the splitter walks the incoming text, peels `<think>...`
+ * segments out, and yields them as `(think, text)` segment pairs. Whichever
+ * side is empty in a given segment is returned as `null` so the caller can
+ * decide whether to emit a yield.
+ *
+ * The splitter is stateful across calls so a `<think>` (or `</think>`) tag
+ * that is split between two SSE chunks is still recognised. Pass the same
+ * instance through the whole stream; call {@link reset} for non-stream use.
+ *
+ * Behaviour:
+ * - `<think>foo</think>bar` → `('foo', null)`, `(null, 'bar')`
+ * - `<think>foo` (no close) → flushed at end via {@link flush}; any
+ *   unterminated prefix is treated as reasoning rather than leaked as text,
+ *   because reasoning is content the user should not see by default.
+ * - Text without any tags passes through unchanged on the text side.
+ * - Nested or stray tags inside reasoning (e.g. `<think><think>x</think>`)
+ *   are not re-interpreted; the first `</think>` closes the outer block.
+ */
+export class ThinkTagSplitter {
+  private buffer = '';
+  private inThink = false;
+
+  /** Feed an incoming chunk; return zero or more `(think, text)` segments. */
+  push(chunk: string): ThinkTagSegment[] {
+    if (chunk.length === 0) return [];
+    this.buffer += chunk;
+    return this.drain(/*final*/ false);
+  }
+
+  /**
+   * End-of-stream flush. Returns any remaining buffered content: a closing
+   * `</think>` is consumed, the rest of the buffer is yielded according to
+   * the current mode. Safe to call multiple times.
+   */
+  flush(): ThinkTagSegment[] {
+    if (this.buffer.length === 0 && !this.inThink) return [];
+    const segments = this.drain(/*final*/ true);
+    this.reset();
+    return segments;
+  }
+
+  /** Reset the splitter state (used by tests and by non-stream use). */
+  reset(): void {
+    this.buffer = '';
+    this.inThink = false;
+  }
+
+  private drain(final: boolean): ThinkTagSegment[] {
+    const segments: ThinkTagSegment[] = [];
+    let cursor = 0;
+
+    while (cursor < this.buffer.length) {
+      if (this.inThink) {
+        const closeIdx = this.buffer.indexOf('</think>', cursor);
+        if (closeIdx === -1) {
+          // No complete close tag in the buffered view. Emit everything up
+          // to a partial-tag-safe suffix, and retain that suffix for the
+          // next call (or flush it on the final call).
+          const retain = final ? 0 : partialTagSuffixLength(this.buffer, '</think>');
+          const emitEnd = this.buffer.length - retain;
+          if (emitEnd > cursor) {
+            segments.push({ think: this.buffer.slice(cursor, emitEnd), text: null });
+            cursor = emitEnd;
+          }
+          break;
+        }
+        // Emit reasoning up to the closing tag, then flip mode.
+        if (closeIdx > cursor) {
+          segments.push({ think: this.buffer.slice(cursor, closeIdx), text: null });
+        }
+        cursor = closeIdx + '</think>'.length;
+        this.inThink = false;
+        // Continue scanning — there may be more content (or another tag)
+        // after the close.
+      } else {
+        // Text mode: scan for whichever tag comes first. A stray close tag
+        // with no matching open is treated as plain visible text; we
+        // never re-enter think mode on it.
+        const openIdx = this.buffer.indexOf('<think>', cursor);
+        const closeIdx = this.buffer.indexOf('</think>', cursor);
+        if (openIdx === -1 && closeIdx === -1) {
+          // No complete tag in the buffered view. Emit text up to a
+          // partial-tag-safe suffix, and retain that suffix.
+          const retainOpen = final ? 0 : partialTagSuffixLength(this.buffer, '<think>');
+          const retainClose = final ? 0 : partialTagSuffixLength(this.buffer, '</think>');
+          // The two partial suffixes could overlap; the longest one wins
+          // because we want to retain enough to recognise either tag.
+          const retain = Math.max(retainOpen, retainClose);
+          const emitEnd = this.buffer.length - retain;
+          if (emitEnd > cursor) {
+            segments.push({ think: null, text: this.buffer.slice(cursor, emitEnd) });
+          }
+          cursor = emitEnd;
+          break;
+        }
+        if (openIdx !== -1 && (closeIdx === -1 || openIdx <= closeIdx)) {
+          // Open tag first (or tied with close, which is impossible since
+          // they have different lengths but we still guard).
+          if (openIdx > cursor) {
+            segments.push({ think: null, text: this.buffer.slice(cursor, openIdx) });
+          }
+          cursor = openIdx + '<think>'.length;
+          this.inThink = true;
+        } else {
+          // Stray close tag — emit as text, do NOT enter think mode.
+          if (closeIdx !== undefined && closeIdx > cursor) {
+            segments.push({ think: null, text: this.buffer.slice(cursor, closeIdx) });
+          }
+          cursor = (closeIdx ?? cursor) + '</think>'.length;
+        }
+      }
+    }
+
+    // Compact the consumed prefix out of the buffer.
+    this.buffer = cursor < this.buffer.length ? this.buffer.slice(cursor) : '';
+    return segments;
+  }
+}
+
+/** One (think, text) segment from {@link ThinkTagSplitter}. */
+export interface ThinkTagSegment {
+  /** Reasoning text to emit as a `ThinkPart`. `null` if no reasoning in this segment. */
+  think: string | null;
+  /** Visible text to emit as a `TextPart`. `null` if no visible text in this segment. */
+  text: string | null;
+}
+
+/**
+ * Convenience: split a complete (non-streaming) content string. Equivalent
+ * to constructing a splitter, pushing the whole string, then flushing.
+ */
+export function splitThinkTags(content: string): ThinkTagSegment[] {
+  const splitter = new ThinkTagSplitter();
+  const out = splitter.push(content);
+  return out.concat(splitter.flush());
+}
+
+/**
+ * Return the length of the longest proper suffix of `buffer` that is a
+ * proper prefix of `tag`. Used by the splitter to retain a potential
+ * partial tag across chunk boundaries without losing data.
+ *
+ * Examples (with `tag = '<think>'`, length 7):
+ *   '<think>'           → 0  (it's the full tag — indexOf would have matched)
+ *   '<thi'              → 4
+ *   'foo<thi'           → 4
+ *   'think>'            → 0  (suffix does not start with `<`)
+ *
+ * For `tag = ''` (length 8):
+ *   '</th'              → 3
+ *   'foo</th'           → 3
+ */
+function partialTagSuffixLength(buffer: string, tag: string): number {
+  const maxLen = tag.length - 1;
+  for (let len = maxLen; len > 0; len--) {
+    const suffix = buffer.slice(buffer.length - len);
+    if (tag.startsWith(suffix)) return len;
+  }
+  return 0;
+}
+
 /** A content part that is neither plain text nor reasoning. */
 export function isMediaPart(part: ContentPart): boolean {
   return part.type !== 'text' && part.type !== 'think';

@@ -1575,6 +1575,91 @@ describe('OpenAILegacyChatProvider — non-stream response parsing', () => {
 
     expect(parts).toEqual([{ type: 'text', text: 'answer' }]);
   });
+
+  it('splits inline <think>...</think> tags out of content (no separate reasoning field)', async () => {
+    // Some OpenAI-compatible providers (e.g. MiniMax-M3) ship their chain
+    // of thought inline as `<think>...</think>` blocks within `content`
+    // instead of a dedicated `reasoning_content` field. The provider must
+    // route those segments to ThinkPart, not leak them as visible text.
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: false,
+    });
+
+    const parts = await collectFromMockedResponse(
+      provider,
+      makeNonStreamResponse({
+        role: 'assistant',
+        content: '<think>The user asked me to say hi in one word. So I should just say "Hi".</think>\n\nHi',
+      }),
+    );
+
+    expect(parts).toEqual([
+      { type: 'think', think: 'The user asked me to say hi in one word. So I should just say "Hi".' },
+      { type: 'text', text: '\n\nHi' },
+    ]);
+  });
+
+  it('inline think block at the start of content with no leading text', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: false,
+    });
+
+    const parts = await collectFromMockedResponse(
+      provider,
+      makeNonStreamResponse({
+        role: 'assistant',
+        content: '<think>reasoning only</think>visible answer',
+      }),
+    );
+
+    expect(parts).toEqual([
+      { type: 'think', think: 'reasoning only' },
+      { type: 'text', text: 'visible answer' },
+    ]);
+  });
+
+  it('inline think block at the end of content with no trailing text', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: false,
+    });
+
+    const parts = await collectFromMockedResponse(
+      provider,
+      makeNonStreamResponse({
+        role: 'assistant',
+        content: 'visible answer<think>reasoning only</think>',
+      }),
+    );
+
+    expect(parts).toEqual([
+      { type: 'text', text: 'visible answer' },
+      { type: 'think', think: 'reasoning only' },
+    ]);
+  });
+
+  it('plain content with no think tags is unchanged', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: false,
+    });
+
+    const parts = await collectFromMockedResponse(
+      provider,
+      makeNonStreamResponse({
+        role: 'assistant',
+        content: 'just a regular reply',
+      }),
+    );
+
+    expect(parts).toEqual([{ type: 'text', text: 'just a regular reply' }]);
+  });
 });
 
 describe('OpenAILegacyChatProvider — non-indexed streaming tool_calls', () => {
@@ -1727,5 +1812,232 @@ describe('OpenAILegacyChatProvider — non-indexed streaming tool_calls', () => 
     for await (const p of stream) parts.push(p as unknown as Record<string, unknown>);
 
     expect(parts).toEqual([]);
+  });
+});
+
+describe('OpenAILegacyChatProvider — inline <think> tag splitting (streaming)', () => {
+  // The OpenAI Chat Completions streaming shape sends `delta.content` as
+  // small chunks. Some OpenAI-compatible providers (MiniMax-M3) interleave
+  // `<think>...</think>` blocks inside these deltas. The provider must
+  // carry state across chunks so a tag split mid-token is still
+  // recognised and routed to ThinkPart instead of leaking as visible text.
+
+  async function* mockStream(
+    chunks: Record<string, unknown>[],
+  ): AsyncIterable<Record<string, unknown>> {
+    for (const c of chunks) yield c;
+  }
+
+  function contentChunk(content: string): Record<string, unknown> {
+    return {
+      id: 'chatcmpl-minimax',
+      choices: [{ index: 0, delta: { content } }],
+    };
+  }
+
+  function finishChunk(): Record<string, unknown> {
+    return {
+      id: 'chatcmpl-minimax',
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+    };
+  }
+
+  async function collect(
+    provider: OpenAILegacyChatProvider,
+    chunks: Record<string, unknown>[],
+): Promise<ContentPart[]> {
+    (
+      provider as unknown as { _client: { chat: { completions: { create: unknown } } } }
+    )._client.chat.completions.create = vi.fn().mockResolvedValue(mockStream(chunks));
+    // Use `generate` so consecutive same-type parts (TextPart + TextPart,
+    // ThinkPart + ThinkPart) get merged by the harness. The raw stream
+    // yields per-chunk segments which would be too granular for the
+    // per-character test below.
+    const result = await generate(
+      provider,
+      '',
+      [],
+      [{ role: 'user', content: [{ type: 'text', text: 'hi' }], toolCalls: [] }],
+    );
+    return result.message.content;
+  }
+
+  it('splits inline <think> tags that arrive in a single content delta', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: true,
+    });
+
+    const parts = await collect(provider, [
+      contentChunk('<think>The user asked me to say hi.</think>\n\nHi'),
+      finishChunk(),
+    ]);
+
+    expect(parts).toEqual([
+      { type: 'think', think: 'The user asked me to say hi.' },
+      { type: 'text', text: '\n\nHi' },
+    ]);
+  });
+
+  it('carries state across deltas when an open tag is split mid-token', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: true,
+    });
+
+    const parts = await collect(provider, [
+      contentChunk('<thi'),
+      contentChunk('nk>reasoning step 1</think>done'),
+      finishChunk(),
+    ]);
+
+    expect(parts).toEqual([
+      { type: 'think', think: 'reasoning step 1' },
+      { type: 'text', text: 'done' },
+    ]);
+  });
+
+  it('carries state across deltas when a close tag is split mid-token', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: true,
+    });
+
+    const parts = await collect(provider, [
+      contentChunk('<think>secret reasoning</th'),
+      contentChunk('ink>visible'),
+      finishChunk(),
+    ]);
+
+    expect(parts).toEqual([
+      { type: 'think', think: 'secret reasoning' },
+      { type: 'text', text: 'visible' },
+    ]);
+  });
+
+  it('interleaves multiple think blocks across many small deltas', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: true,
+    });
+
+    // Each character is its own delta — pathological case to stress the
+    // splitter's buffering across a long stream.
+    const full =
+      '<think>step 1</think>ok <<think>step 2</think>done';
+    const chunks = Array.from(full).map((c) => contentChunk(c));
+    chunks.push(finishChunk());
+
+    const parts = await collect(provider, chunks);
+
+    // Drop empty segments — the splitter yields empty parts when it
+    // buffers content while waiting for a complete tag, and we filter
+    // those out before yielding from the provider.
+    const nonEmpty = parts.filter((p) => {
+      if (p.type === 'think') return p.think.length > 0;
+      if (p.type === 'text') return p.text.length > 0;
+      return true;
+    });
+
+    expect(nonEmpty).toEqual([
+      { type: 'think', think: 'step 1' },
+      { type: 'text', text: 'ok ' },
+      { type: 'think', think: 'step 2' },
+      { type: 'text', text: 'done' },
+    ]);
+  });
+
+  it('flushes trailing think content as ThinkPart on stream end', async () => {
+    // Provider-level: when the stream ends mid-reasoning (no close tag),
+    // the splitter flushes the buffered reasoning as a ThinkPart on the
+    // final iterator step. We assert this at the iterator level to avoid
+    // the `generate` loop's "only thinking" guard, which would convert
+    // this case into an APIEmptyResponseError at the harness layer.
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: true,
+    });
+
+    (
+      provider as unknown as { _client: { chat: { completions: { create: unknown } } } }
+    )._client.chat.completions.create = vi
+      .fn()
+      .mockResolvedValue(
+        mockStream([
+          contentChunk('<think>partial reasoning that never closes'),
+          finishChunk(),
+        ]),
+      );
+
+    const stream = await provider.generate('', [], []);
+    const parts: StreamedMessagePart[] = [];
+    for await (const p of stream) parts.push(p);
+
+    expect(parts).toEqual([
+      { type: 'think', think: 'partial reasoning that never closes' },
+    ]);
+  });
+
+  it('content with no think tags passes through unchanged', async () => {
+    const provider = new OpenAILegacyChatProvider({
+      model: 'MiniMax-M3',
+      apiKey: 'test-key',
+      stream: true,
+    });
+
+    const parts = await collect(provider, [
+      contentChunk('hello '),
+      contentChunk('world'),
+      finishChunk(),
+    ]);
+
+    expect(parts).toEqual([{ type: 'text', text: 'hello world' }]);
+  });
+
+  it('does not leak inline <think> text when reasoning_content is also present', async () => {
+    // When a provider sends both an explicit `reasoning_content` field
+    // AND inline `<think>` tags inside `content`, both should be routed
+    // to ThinkPart (the harness merges consecutive think parts). The
+    // critical assertion is that the visible text after the merge does
+    // NOT contain the literal `<think>...</think>` substring.
+    const provider = new OpenAILegacyChatProvider({
+      model: 'oddball',
+      apiKey: 'test-key',
+      stream: true,
+    });
+
+    const chunks = [
+      {
+        id: 'chatcmpl-both',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              reasoning_content: 'official reasoning',
+              content: '<think>stray inline reasoning</think>answer',
+            },
+          },
+        ],
+      },
+      finishChunk(),
+    ];
+
+    const parts = await collect(provider, chunks);
+
+    // Both reasoning sources are routed to ThinkPart and merged by
+    // `generate()` since they are consecutive. The visible text after
+    // must not contain the literal `<think>` substring.
+    expect(parts).toEqual([
+      {
+        type: 'think',
+        think: 'official reasoningstray inline reasoning',
+      },
+      { type: 'text', text: 'answer' },
+    ]);
   });
 });
