@@ -42,7 +42,8 @@ The agent core gained an `Orchestrator` that runs pluggable `OrchestrationPolicy
 |------|--------|
 | Continuous plan tracker (P0) | **DONE** — re-architected as `PlanTrackingPolicy` |
 | Persistent cross-session memory (P2) | **DONE** — `MemoryStore` + `MemoryPolicy` |
-| **Sync to upstream v0.19 (Phase 13)** | **DONE** — `0.19.0-fork-merge` branch. Resolved 30 conflict files / 48 markers, kept all fork-specific features (orchestrator, swarm subagent plumbing, MiniMax-M3 think-tag strip, ACP adapter telemetry, `skill_routing` enabled by default). |
+| **Sync to upstream v0.19 (Phase 13)** | **DONE** — `0.19.0-fork-merge` branch. Resolved 30 conflict files / 48 markers, kept all fork-specific features (orchestrator, swarm subagent plumbing, MiniMax-M3 think-tag strip, ACP adapter telemetry). `skill_routing` is **off by default** to avoid the over-eager activation that matched skills on incidental token overlap. |
+| **Sync to upstream v0.19.2 (Phase 14)** | **DONE** — `0.19.2-fork-merge` branch. Replayed the upstream `0.19.1` and `0.19.2` release commits on top of Phase 13. All fork-specific features preserved (orchestrator + SkillRouter code intact, swarm subagent plumbing, MiniMax-M3 think-tag strip, ACP adapter telemetry, `skill_routing` opt-in flag). |
 
 ---
 

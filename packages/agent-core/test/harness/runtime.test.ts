@@ -252,6 +252,7 @@ micro_compaction = false
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await core.createSessionWithOverrides(

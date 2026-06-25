@@ -86,6 +86,8 @@ This branch adds an `Orchestrator` runtime + swarm visibility on top of upstream
 - `FORK_CHANGES.md` — user-facing changes vs upstream.
 - `ROADMAP.md` — implementation status + open items.
 
+**Skill routing is off by default.** The orchestrator's `SkillRoutingPolicy` registers in `packages/agent-core/src/agent/index.ts` but it short-circuits unless `KIMI_CODE_EXPERIMENTAL_SKILL_ROUTING=1` is set. This is intentional — the previous default was firing on incidental token overlap, so skills activated even when the prompt had nothing to do with them. Do not flip the flag default back to `true` without talking to the user first; the regression coverage is in `packages/agent-core/test/agent/skill-prompt.test.ts`.
+
 Key invariants worth knowing when touching this code:
 
 - `Orchestrator.getDiagnostics()` is the canonical surface for orchestrator state; `/status` and `/diag` both read from it.
