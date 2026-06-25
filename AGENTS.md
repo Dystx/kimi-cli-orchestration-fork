@@ -88,6 +88,8 @@ This branch adds an `Orchestrator` runtime + swarm visibility on top of upstream
 
 **Skill routing is off by default.** The orchestrator's `SkillRoutingPolicy` registers in `packages/agent-core/src/agent/index.ts` but it short-circuits unless `KIMI_CODE_EXPERIMENTAL_SKILL_ROUTING=1` is set. This is intentional — the previous default was firing on incidental token overlap, so skills activated even when the prompt had nothing to do with them. Do not flip the flag default back to `true` without talking to the user first; the regression coverage is in `packages/agent-core/test/agent/skill-prompt.test.ts`.
 
+**Fork tracks upstream version 1:1.** `FORK_CHANGES.md` → "Tracking upstream" is the source of truth. Do not run `pnpm changeset version` between upstream syncs; do not declare `minor` or `major` bumps in fork changesets; do not invent a fork release line (`0.X.0-fork.N`). All pending changesets in `.changeset/` should declare `patch` only. When upstream ships a new release, sync via merge and consume pending changesets in the same release; the merge commit itself advances the version numbers and the changeset consumption produces a coordinated patch bump that keeps the fork aligned.
+
 Key invariants worth knowing when touching this code:
 
 - `Orchestrator.getDiagnostics()` is the canonical surface for orchestrator state; `/status` and `/diag` both read from it.

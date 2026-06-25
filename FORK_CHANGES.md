@@ -4,6 +4,18 @@ User-facing changes in this fork that diverge from upstream Kimi Code.
 
 Each phase ships with a design spec (`docs/superpowers/specs/`) and implementation plan (`docs/superpowers/plans/`); this document is the high-level summary.
 
+## Tracking upstream
+
+The fork tracks upstream `@moonshot-ai/kimi-code` version 1:1. The fork's `@moonshot-ai/kimi-code` package version is always equal to the most recently synced upstream release tag (currently `0.19.2`).
+
+Operational rules:
+
+- **Do not run `pnpm changeset version` between upstream syncs.** Pending fork changesets in `.changeset/` are documentation of fork-specific work; they accumulate until the next upstream release sync. At that point, the upstream merge commit itself advances the version numbers, and consuming the pending changesets at the same time produces a coordinated patch bump that keeps the fork aligned with upstream.
+- **Every pending changeset in `.changeset/` declares `patch` bumps only.** A changeset that justifies a `minor` or `major` bump is a signal that the change is not yet appropriate for the fork — it should land in upstream first, or be deferred. (The `minor` claims in older changesets were downgraded to `patch` when this policy was established; see git history.)
+- **Do not declare a fork-specific version line.** The fork does not publish to npm and does not cut `0.X.0-fork.N` releases. The CHANGELOG for each release comes from upstream; the fork's value-add shows up in `FORK_CHANGES.md` and the code.
+- **The upstream `.changeset/config.json` changelog generator is intentionally broken for the fork.** It points at `MoonshotAI/kimi-code` (not the fork) and requires `GITHUB_TOKEN`. If `pnpm changeset version` is ever run on the fork, the changelog generator will fail before any version is touched. The fork writes release notes manually into `CHANGELOG.md` if needed; do not reconfigure the generator without a reason.
+- **Sync procedure**: when upstream ships a new release, create a branch from the current `main`, merge `upstream/<tag>` (or `upstream/main` if no tag exists), resolve conflicts in the fork's favour for fork-specific files, run `pnpm changeset version` to consume any pending fork changesets at the same time, verify the fork's `@moonshot-ai/kimi-code` version equals the upstream tag, push, and fast-forward `main`.
+
 ## Orchestration refactor (Phases 1–8)
 
 The fork introduces an event-driven orchestration layer on top of the upstream agent core.

@@ -1,12 +1,12 @@
 ---
-"@moonshot-ai/agent-core": minor
-"@moonshot-ai/kimi-code": minor
-"@moonshot-ai/kosong": minor
-"@moonshot-ai/node-sdk": minor
-"@moonshot-ai/protocol": minor
-"@moonshot-ai/acp-adapter": minor
-"@moonshot-ai/oauth": minor
-"@moonshot-ai/telemetry": minor
+"@moonshot-ai/agent-core": patch
+"@moonshot-ai/kimi-code": patch
+"@moonshot-ai/kosong": patch
+"@moonshot-ai/kimi-code-sdk": patch
+"@moonshot-ai/protocol": patch
+"@moonshot-ai/acp-adapter": patch
+"@moonshot-ai/kimi-code-oauth": patch
+"@moonshot-ai/kimi-telemetry": patch
 ---
 
 Sync fork to upstream v0.19.2.
