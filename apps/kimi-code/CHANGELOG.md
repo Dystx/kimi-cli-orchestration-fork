@@ -1,36 +1,5 @@
 # @moonshot-ai/kimi-code
 
-## 0.20.0
-
-### Minor Changes (fork release — @Dystx/kimi-cli-orchestration-fork)
-
-First fork release on top of upstream `@moonshot-ai/kimi-code@0.19.2`. Aggregates every change accumulated in the `0.19.0-fork-merge` and `0.19.2-fork-merge` branches and bundles them into a single coordinated minor bump across the workspace packages that the fork touches.
-
-**Orchestration refactor (Phases 1–8).** New `Orchestrator` runtime in `packages/agent-core/src/agent/orchestrator/` runs pluggable `OrchestrationPolicy` instances before each step. The fork ships three policies: `PlanTrackingPolicy` (continuous plan tracker), `MemoryPolicy` (auto-inject relevant notes from the memory store), and `SkillRoutingPolicy` (auto-score and activate relevant skills). `Orchestrator.getDiagnostics()` is the canonical surface for orchestrator state; `/status` and `/diag` slash commands both read from it.
-
-**Skill routing is opt-in by default.** The `skill_routing` flag in `packages/agent-core/src/flags/registry.ts` now defaults to `false`. The previous default fired the `SkillRouter` on incidental token overlap (`run lint` activated every skill mentioning "run" or "lint", `go` activated anything mentioning "go"), which made the orchestrator too eager for the user's actual task. Enable explicitly with `KIMI_CODE_EXPERIMENTAL_SKILL_ROUTING=1`. When enabled, the router requires `minOverlap: 2` distinct shared tokens, `minMessageTokens: 6`, and a relative score ≥ 0.25.
-
-**Swarm visibility (Phases 9–12).** `Session.swarmRuns` registry, `subscribeSwarmRuns` / `getActiveSwarmRun` / `getSwarmRunHistory` accessors, and `emitSwarmSnapshot` fan-out as a typed `swarm.run.snapshot` event over the SDK RPC pipe. Live `SwarmProgressController` mounts a `UsagePanelComponent` per swarm member. `SDKAgentAPI.onEvent` subscription surface re-emits child tool events stamped with `subagentId` from the subagent host.
-
-**MemoryStore + bundled MCP server.** New `MemoryStore` interface and `memory_read / memory_write / memory_search / memory_delete` MCP tools, auto-served when `SessionOptions.enableMemoryMcpServer = true`.
-
-**Search providers.** `minimax-web-search`, `minimax-image-search`, and a `chained-web-search` composer that tries a primary provider and falls back to a secondary on empty result or error. The existing `web_search` builtin routes through this chain. Configurable via `[search.web]` TOML block; falls back to upstream behavior when unconfigured.
-
-**MiniMax-M3 dual-channel think-tag strip.** The OpenAI legacy streaming converter now marks the inline-tag splitter as soon as any delta carries reasoning via the dedicated `reasoning` / `reasoning_content` / `reasoning_details` field, and drops every subsequent inline `<think>…</think>` segment it would otherwise echo as a `ThinkPart`. `mergeInPlace` for `ThinkPart` also detects prefix relations between consecutive chunks so providers that re-emit their chain of thought with extensions render one canonical reasoning stream per turn instead of the same chain rendered multiple times.
-
-**Other.** Git status reads are async and TTL-cached so the footer never blocks on `git` or `gh`. Agent tool and profile prompt sources use `?raw` imports so they are bundled into `dist/`. The skill scanner also looks at `~/.kimi/skills/` as a legacy user skill root. `RPCMethods<T>` preserves function-returning methods (e.g. `onEvent` subscriptions) without forcing `Promise<…>` wrapping.
-
-### Patch Changes (fork follow-ups)
-
-- `packages/agent-core/src/agent/compaction/full.ts` — distinguish destructive history changes (length shrank, prefix mutated) from safe appends (length grew, prefix untouched) so the WIP `runOnce` no longer cancels when a tool call appends during compaction.
-- `packages/agent-core/test/harness/runtime.test.ts` — added `onEvent: () => () => {}` to the upstream issue #988 regression mock so it satisfies the fork's `SDKAgentAPI.onEvent` contract.
-
-### Skipped upstream entries
-
-The full upstream `0.19.0` → `0.19.1` → `0.19.2` release notes are preserved below. The fork's `0.20.0` section above describes only fork-specific work on top of those releases.
-
----
-
 ## 0.19.2
 
 ### Patch Changes
