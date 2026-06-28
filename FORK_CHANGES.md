@@ -6,7 +6,7 @@ Each phase ships with a design spec (`docs/superpowers/specs/`) and implementati
 
 ## Tracking upstream
 
-The fork tracks upstream `@moonshot-ai/kimi-code` version 1:1. The fork's `@moonshot-ai/kimi-code` package version is always equal to the most recently synced upstream release tag (currently `0.19.2`).
+The fork tracks upstream `@moonshot-ai/kimi-code` version 1:1. The fork's `@moonshot-ai/kimi-code` package version is always equal to the most recently synced upstream release tag (currently `0.20.1`).
 
 Operational rules:
 
@@ -74,6 +74,25 @@ Branch `0.19.0-fork-merge` carries the fork forward to upstream `v0.19.0` (92 co
 - **apps/vis/web** — new thin-dispatcher + `renderers.tsx` registry for `WireHeadline` / `WireRowDetail`. The fork adopts this architecture (per-kind renderers live in `renderers.tsx` now).
 
 The merge resolved 30 conflict files / 48 conflict markers. Two `packages/agent-core/test/agent/compaction/full.test.ts` cases time out (`keeps messages appended while compacting an unchanged prefix` and `continues a manual compaction run when the first pass still exceeds the trigger`); the WIP retry path inside `runOnce` fires `triggerPostCompactHook` and `injectGoal` in an order the snapshot doesn't expect. Tracked as known issues for follow-up; everything else (8542 tests) passes.
+
+## Synced to upstream v0.20 + v0.20.1
+
+Branch `0.20.1-fork-merge` carries the fork forward to upstream `v0.20.1` (47 commits between the 0.19.2 and 0.20.0 release tags, plus 3 patch commits on top of 0.20.0 → 0.20.1). Every fork-specific entry above is preserved.
+
+Notable upstream additions adopted in this sync:
+
+- **agent-core / skill system** — `loadAgentsMdForRoots` now returns `{ content, warning }` so a soft 32 KB budget surfaces a user-visible warning rather than truncating AGENTS.md silently. Truncated skill descriptions are marked with an ellipsis.
+- **hooks** — plugin-defined `HookDef` can now carry `cwd` and `env`, plus the fork's `system?: boolean` flag. Plugin session-start reminders are re-injected after `/reload`.
+- **CLI** — `-c` shorthand for `--continue`, `update` alias for `upgrade`, third-party plugin install confirm dialog, config hint in max-steps error, the new `/web` command.
+- **server** — bearer-token auth, `--host` for opt-in LAN binding, `--allowed-host` for DNS-rebinding allowlist, Windows `bcryptjs` ESM fix, the `session.cwd`-aware stdio MCP server path.
+- **TUI** — Ctrl+U / Ctrl+D paging in the task output viewer, Alt+S to switch model for current session only, ctrl+t to expand the todo list, the `/plugins` redesign as a tabbed panel, working-tip behind composing spinner, clipboard image paste hint behind a Linux startup-crash fix, the cli spawn `EFTYPE` resolution for kimi web on Windows.
+- **web** — auto-grow composer + expandable editing mode, LaTeX math via KaTeX, inline edit-diffs in tool call cards, full accumulated subagent progress, copy button on user messages, plan-review card with plan body and approach choices, sessions list paged per workspace.
+- **shell mode** — new `!` prefix in the CLI runs a command and returns to the prompt.
+- **plugin marketplace** — Superpowers is now sourced from GitHub; installed plugins show update badges.
+
+The merge had 8 conflict files (`.gitignore`, `apps/kimi-code/src/tui/components/dialogs/tabbed-model-selector.ts`, `packages/agent-core/src/profile/{context,resolve,default/system.md}`, `packages/agent-core/src/services/coreProcess/coreProcessClient.ts`, `packages/agent-core/src/session/{hooks/types,index}.ts`). All resolved by taking upstream's structural change and re-applying the fork's additive delta (orchestrator + swarm + skill-routing opt-in + memory + minimax think-tag + soul/memory system-prompt injection). The fork's `skill_routing` flag is still default `false`; the `SkillRoutingPolicy` still short-circuits in `beforeStep` unless `KIMI_CODE_EXPERIMENTAL_SKILL_ROUTING=1` is set.
+
+Post-merge fallout: 5 `sdkRpc` mocks in `packages/agent-core/test/harness/runtime.test.ts` and 1 `AgentSwarmTool` call site in `packages/agent-core/test/tools/builtin-current.test.ts` were updated to satisfy the fork's `SDKAgentAPI.onEvent` contract and the new `AgentSwarmTool(subagentHost, swarmMode, session)` signature. `pnpm typecheck`, `pnpm lint`, `pnpm test` (9068 passed, 0 failed on rerun; two `packages/server/test/fs-watch.e2e.test.ts` timing-sensitive cases were flaky on the first run), and `pnpm build` are all green.
 
 ## Architecture overview
 

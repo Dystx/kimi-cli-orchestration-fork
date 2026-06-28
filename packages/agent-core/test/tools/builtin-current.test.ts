@@ -544,7 +544,7 @@ describe('current builtin collaboration tools', () => {
   });
 
   it('AgentSwarm description states the enforced input requirements', () => {
-    const description = new AgentSwarmTool(mockSubagentHost({}), mockSwarmMode()).description;
+    const description = new AgentSwarmTool(mockSubagentHost({}), mockSwarmMode(), mockSession()).description;
     // Mirrors the throws in createAgentSwarmSpecs (agent-swarm.ts): min-2-unless-resume,
     // prompt_template required + must contain {{item}}, distinct resulting prompts.
     expect(description).toContain('at least 2');

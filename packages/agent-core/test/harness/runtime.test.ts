@@ -961,6 +961,7 @@ base_url = "https://search.example.test/v1"
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     await core.installPlugin({ source: pluginRoot });
@@ -1019,6 +1020,7 @@ base_url = "https://search.example.test/v1"
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     await core.installPlugin({ source: pluginRoot });
@@ -1067,6 +1069,7 @@ base_url = "https://search.example.test/v1"
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     await core.installPlugin({ source: pluginRoot });
@@ -1102,6 +1105,7 @@ base_url = "https://search.example.test/v1"
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     await core.installPlugin({ source: pluginRoot });
@@ -1134,6 +1138,7 @@ base_url = "https://search.example.test/v1"
       requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
       requestQuestion: vi.fn(async () => null),
       toolCall: vi.fn(async () => ({ output: '' })),
+      onEvent: () => () => {},
     });
 
     const created = await rpc.createSession({
