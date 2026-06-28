@@ -29,6 +29,8 @@ export interface HookDef {
   readonly timeout?: number;
   /** Whether this hook was registered by the system (true) or user (false/default). */
   readonly system?: boolean;
+  readonly cwd?: string;
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 export interface HookResult {
