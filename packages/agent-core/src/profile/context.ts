@@ -16,7 +16,6 @@ const AGENTS_MD_RECOMMENDED_MAX_BYTES = 32 * 1024;
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
 
-<<<<<<< HEAD
 export type PreparedSystemPromptContext = Pick<
   SystemPromptContext,
   'cwdListing' | 'agentsMd' | 'soulMd' | 'memory' | 'additionalDirsInfo'
@@ -24,13 +23,6 @@ export type PreparedSystemPromptContext = Pick<
   /** Present when the combined AGENTS.md content exceeds the recommended size. */
   readonly agentsMdWarning?: string;
 };
-=======
-export interface PreparedSystemPromptContext
-  extends Pick<SystemPromptContext, 'cwdListing' | 'agentsMd' | 'additionalDirsInfo'> {
-  /** Present when the combined AGENTS.md content exceeds the recommended size. */
-  readonly agentsMdWarning?: string;
-}
->>>>>>> upstream-0.20.1
 
 export interface PrepareSystemPromptContextOptions {
   readonly additionalDirs?: readonly string[];
